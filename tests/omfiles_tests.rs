@@ -5,7 +5,7 @@ use om_file_format_sys::{
     om_variable_get_type, om_variable_init, om_variable_write_scalar,
     om_variable_write_scalar_size,
 };
-use omfiles_rs::{
+use omfiles::{
     backend::{
         backends::{InMemoryBackend, OmFileReaderBackend},
         mmapfile::{MmapFile, Mode},

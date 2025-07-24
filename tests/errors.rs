@@ -1,10 +1,10 @@
 use ndarray::ArrayD;
-use omfiles_rs::backend::backends::InMemoryBackend;
-use omfiles_rs::backend::mmapfile::MmapFile;
-use omfiles_rs::core::compression::CompressionType;
-use omfiles_rs::errors::OmFilesRsError;
-use omfiles_rs::io::reader::OmFileReader;
-use omfiles_rs::io::writer::OmFileWriter;
+use omfiles::backend::backends::InMemoryBackend;
+use omfiles::backend::mmapfile::MmapFile;
+use omfiles::core::compression::CompressionType;
+use omfiles::errors::OmFilesRsError;
+use omfiles::io::reader::OmFileReader;
+use omfiles::io::writer::OmFileWriter;
 use std::borrow::BorrowMut;
 use std::fs;
 use std::sync::Arc;
