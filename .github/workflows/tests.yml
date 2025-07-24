@@ -20,7 +20,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
       - name: Build
-        run: cargo build --verbose
+        run: cargo build -vv
       - name: Run tests
         run: cargo test --verbose
 
