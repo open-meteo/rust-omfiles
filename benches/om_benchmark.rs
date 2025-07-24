@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use omfiles_rs::{
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use omfiles::{
     backend::{
         backends::InMemoryBackend,
         mmapfile::{MmapFile, Mode},

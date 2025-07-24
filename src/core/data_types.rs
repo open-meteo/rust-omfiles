@@ -35,6 +35,23 @@ impl DataType {
     pub fn to_c(&self) -> OmDataType_t {
         unsafe { std::mem::transmute(*self as u32) }
     }
+
+    pub fn is_array(&self) -> bool {
+        match self {
+            DataType::Int8Array
+            | DataType::Uint8Array
+            | DataType::Int16Array
+            | DataType::Uint16Array
+            | DataType::Int32Array
+            | DataType::Uint32Array
+            | DataType::Int64Array
+            | DataType::Uint64Array
+            | DataType::FloatArray
+            | DataType::DoubleArray
+            | DataType::StringArray => true,
+            _ => false,
+        }
+    }
 }
 
 impl TryFrom<u8> for DataType {

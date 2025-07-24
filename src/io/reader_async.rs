@@ -16,7 +16,7 @@ use async_lock::Semaphore;
 use ndarray::ArrayD;
 use num_traits::Zero;
 use om_file_format_sys::{
-    om_header_size, om_header_type, om_trailer_size, OmHeaderType_t, OmRange_t,
+    OmHeaderType_t, OmRange_t, om_header_size, om_header_type, om_trailer_size,
 };
 use std::ffi::c_void;
 use std::num::NonZeroUsize;
