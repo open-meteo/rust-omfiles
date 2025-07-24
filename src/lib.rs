@@ -6,6 +6,7 @@ pub mod io {
     pub(crate) mod buffered_writer;
     pub mod reader;
     pub mod reader_async;
+    pub mod reader_async_io_uring;
     pub(crate) mod reader_utils;
     pub(crate) mod variable;
     #[macro_use]
@@ -23,6 +24,7 @@ pub mod core {
 pub mod backend {
     pub mod backends;
     pub mod mmapfile;
+    pub mod io_uring;
 }
 
 pub mod errors;
