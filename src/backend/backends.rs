@@ -4,8 +4,8 @@ use crate::core::data_types::OmFileArrayDataType;
 use crate::errors::OmFilesRsError;
 use ndarray::ArrayD;
 use om_file_format_sys::{
-    om_decoder_decode_chunks, om_decoder_next_data_read, om_decoder_next_index_read, OmDecoder_t,
-    OmError_t,
+    OmDecoder_t, OmError_t, om_decoder_decode_chunks, om_decoder_next_data_read,
+    om_decoder_next_index_read,
 };
 use std::borrow::Cow;
 use std::fs::File;

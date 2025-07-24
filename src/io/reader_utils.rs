@@ -7,11 +7,13 @@ use std::os::raw::c_void;
 pub unsafe fn process_trailer(trailer_data: &[u8]) -> Result<OmOffsetSize, OmFilesRsError> {
     let mut offset = 0u64;
     let mut size = 0u64;
-    if !om_trailer_read(
-        trailer_data.as_ptr() as *const c_void,
-        &mut offset,
-        &mut size,
-    ) {
+    if unsafe {
+        !om_trailer_read(
+            trailer_data.as_ptr() as *const c_void,
+            &mut offset,
+            &mut size,
+        )
+    } {
         return Err(OmFilesRsError::NotAnOmFile);
     }
 

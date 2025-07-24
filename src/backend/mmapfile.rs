@@ -33,7 +33,9 @@ impl MmapType {
     ) -> std::io::Result<()> {
         match self {
             MmapType::ReadOnly(mmap) => unsafe { mmap.unchecked_advise_range(advice, offset, len) },
-            MmapType::ReadWrite(mmap_mut) => mmap_mut.unchecked_advise_range(advice, offset, len),
+            MmapType::ReadWrite(mmap_mut) => unsafe {
+                mmap_mut.unchecked_advise_range(advice, offset, len)
+            },
         }
     }
 
