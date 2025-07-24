@@ -1,5 +1,5 @@
 [package]
-name = "omfiles-rs"
+name = "omfiles"
 version = "0.1.0"
 description = "A Rust library for reading and writing Open-Meteo files"
 edition = "2024"

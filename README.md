@@ -19,7 +19,7 @@ cargo test
 Assuming the file `data.om` directly contains a floating point array with 3 dimensions
 
 ```rust
-use omfiles_rs::io::reader::OmFileReader;
+use omfiles::io::reader::OmFileReader;
 
 let file = "data.om";
 let reader = OmFileReader::from_file(file).expect(format!("Failed to open file: {}", file).as_str());
