@@ -6,12 +6,11 @@ use crate::errors::OmFilesRsError;
 use crate::io::buffered_writer::OmBufferedWriter;
 use ndarray::ArrayViewD;
 use om_file_format_sys::{
-    om_encoder_chunk_buffer_size, om_encoder_compress_chunk, om_encoder_compress_lut,
-    om_encoder_compressed_chunk_buffer_size, om_encoder_count_chunks,
+    OmEncoder_t, OmError_t, om_encoder_chunk_buffer_size, om_encoder_compress_chunk,
+    om_encoder_compress_lut, om_encoder_compressed_chunk_buffer_size, om_encoder_count_chunks,
     om_encoder_count_chunks_in_array, om_encoder_init, om_encoder_lut_buffer_size, om_header_write,
     om_header_write_size, om_trailer_size, om_trailer_write, om_variable_write_numeric_array,
     om_variable_write_numeric_array_size, om_variable_write_scalar, om_variable_write_scalar_size,
-    OmEncoder_t, OmError_t,
 };
 use std::borrow::BorrowMut;
 use std::marker::PhantomData;

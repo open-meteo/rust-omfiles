@@ -24,7 +24,7 @@ impl OmFileReaderAsync<IoUringBackend> {
     ///
     /// # Example
     /// ```no_run
-    /// use omfiles_rs::io::reader_async::OmFileReaderAsync;
+    /// use omfiles::io::reader_async::OmFileReaderAsync;
     /// use std::num::NonZeroUsize;
     ///
     /// async fn example() {

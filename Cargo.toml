@@ -1,19 +1,14 @@
 [package]
-name = "omfiles-rs"
+name = "omfiles"
 version = "0.1.0"
-edition = "2021"
+description = "A Rust library for reading and writing Open-Meteo files"
+edition = "2024"
+license = "GPL-2.0-only"
+readme = "README.md"
 
 
 [lib]
 crate-type = ["cdylib", "rlib"]
-
-[[bin]]
-name = "testread"
-path = "src/bin/testread.rs"
-
-[[bin]]
-name = "reformat"
-path = "src/bin/reformat.rs"
 
 # some optimizations for binary/library size in release builds
 # compare: https://github.com/johnthagen/min-sized-rust

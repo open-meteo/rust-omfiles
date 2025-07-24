@@ -4,18 +4,17 @@ use crate::core::data_types::OmFileArrayDataType;
 use crate::errors::OmFilesRsError;
 use ndarray::ArrayD;
 use om_file_format_sys::{
-    om_decoder_decode_chunks, om_decoder_next_data_read, om_decoder_next_index_read, OmDecoder_t,
-    OmError_t,
+    OmDecoder_t, OmError_t, om_decoder_decode_chunks, om_decoder_next_data_read,
+    om_decoder_next_index_read,
 };
 use std::borrow::Cow;
 use std::fs::File;
 use std::future::Future;
-use std::io::{Seek, SeekFrom, Write};
+use std::io::Write;
 use std::os::raw::c_void;
 
 pub trait OmFileWriterBackend {
     fn write(&mut self, data: &[u8]) -> Result<(), OmFilesRsError>;
-    fn write_at(&mut self, data: &[u8], offset: usize) -> Result<(), OmFilesRsError>;
     fn synchronize(&self) -> Result<(), OmFilesRsError>;
 }
 
@@ -157,13 +156,6 @@ impl OmFileWriterBackend for &File {
         Ok(())
     }
 
-    fn write_at(&mut self, data: &[u8], offset: usize) -> Result<(), OmFilesRsError> {
-        self.seek(SeekFrom::Start(offset as u64))
-            .map_err(|e| map_io_error(e))?;
-        self.write_all(data).map_err(|e| map_io_error(e))?;
-        Ok(())
-    }
-
     fn synchronize(&self) -> Result<(), OmFilesRsError> {
         self.sync_all().map_err(|e| map_io_error(e))?;
         Ok(())
@@ -172,13 +164,6 @@ impl OmFileWriterBackend for &File {
 
 impl OmFileWriterBackend for File {
     fn write(&mut self, data: &[u8]) -> Result<(), OmFilesRsError> {
-        self.write_all(data).map_err(|e| map_io_error(e))?;
-        Ok(())
-    }
-
-    fn write_at(&mut self, data: &[u8], offset: usize) -> Result<(), OmFilesRsError> {
-        self.seek(SeekFrom::Start(offset as u64))
-            .map_err(|e| map_io_error(e))?;
         self.write_all(data).map_err(|e| map_io_error(e))?;
         Ok(())
     }
@@ -241,13 +226,6 @@ impl InMemoryBackend {
 impl OmFileWriterBackend for &mut InMemoryBackend {
     fn write(&mut self, data: &[u8]) -> Result<(), OmFilesRsError> {
         self.data.extend_from_slice(data);
-        Ok(())
-    }
-
-    fn write_at(&mut self, data: &[u8], offset: usize) -> Result<(), OmFilesRsError> {
-        self.data.reserve(offset + data.len());
-        let dst = &mut self.data[offset..offset + data.len()];
-        dst.copy_from_slice(data);
         Ok(())
     }
 

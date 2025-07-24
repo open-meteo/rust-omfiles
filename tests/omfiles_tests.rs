@@ -1,11 +1,11 @@
 use macro_rules_attribute::apply;
-use ndarray::{s, Array2, ArrayD, ArrayViewD};
+use ndarray::{Array2, ArrayD, ArrayViewD, s};
 use om_file_format_sys::{
-    fpxdec32, fpxenc32, om_variable_get_children_count, om_variable_get_scalar,
+    OmError_t, fpxdec32, fpxenc32, om_variable_get_children_count, om_variable_get_scalar,
     om_variable_get_type, om_variable_init, om_variable_write_scalar,
-    om_variable_write_scalar_size, OmError_t,
+    om_variable_write_scalar_size,
 };
-use omfiles_rs::{
+use omfiles::{
     backend::{
         backends::{InMemoryBackend, OmFileReaderBackend},
         mmapfile::{MmapFile, Mode},
@@ -755,7 +755,9 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
         );
         assert_eq!(
             &bytes[65..87],
-            &[4, 6, 0, 0, 0, 0, 0, 0, 0, 0, 64, 42, 129, 103, 65, 100, 111, 117, 98, 108, 101, 0]
+            &[
+                4, 6, 0, 0, 0, 0, 0, 0, 0, 0, 64, 42, 129, 103, 65, 100, 111, 117, 98, 108, 101, 0
+            ]
         );
         assert_eq!(
             &bytes[88..212],
@@ -769,7 +771,9 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
         );
         assert_eq!(
             &bytes[216..240],
-            &[79, 77, 3, 0, 0, 0, 0, 0, 88, 0, 0, 0, 0, 0, 0, 0, 124, 0, 0, 0, 0, 0, 0, 0]
+            &[
+                79, 77, 3, 0, 0, 0, 0, 0, 88, 0, 0, 0, 0, 0, 0, 0, 124, 0, 0, 0, 0, 0, 0, 0
+            ]
         );
     }
 

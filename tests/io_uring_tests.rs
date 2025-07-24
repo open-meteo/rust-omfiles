@@ -1,7 +1,7 @@
 #[cfg(target_os = "linux")]
 mod tests {
     use macro_rules_attribute::apply;
-    use omfiles_rs::io::reader_async::OmFileReaderAsync;
+    use omfiles::io::reader_async::OmFileReaderAsync;
     use smol_macros::test;
     use std::path::Path;
 
