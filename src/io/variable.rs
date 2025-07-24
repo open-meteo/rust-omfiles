@@ -1,5 +1,5 @@
 use crate::io::writer::OmOffsetSize;
-use om_file_format_sys::{om_variable_init, OmVariable_t};
+use om_file_format_sys::{OmVariable_t, om_variable_init};
 use std::ops::Deref;
 use std::os::raw::c_void;
 

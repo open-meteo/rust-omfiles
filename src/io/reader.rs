@@ -9,7 +9,7 @@ use crate::io::writer::OmOffsetSize;
 use ndarray::ArrayD;
 use num_traits::Zero;
 use om_file_format_sys::{
-    om_header_size, om_header_type, om_trailer_size, om_variable_get_children, OmHeaderType_t,
+    OmHeaderType_t, om_header_size, om_header_type, om_trailer_size, om_variable_get_children,
 };
 use std::collections::HashMap;
 use std::fs::File;

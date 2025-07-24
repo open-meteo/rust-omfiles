@@ -1,18 +1,18 @@
 use om_file_format_sys::{
-    om_decoder_init_data_read, om_decoder_init_index_read, om_error_string, OmDecoder_dataRead_t,
-    OmDecoder_indexRead_t, OmDecoder_t, OmEncoder_t, OmError_t,
+    OmDecoder_dataRead_t, OmDecoder_indexRead_t, OmDecoder_t, OmEncoder_t, OmError_t,
+    om_decoder_init_data_read, om_decoder_init_index_read, om_error_string,
 };
 
 /// Create an uninitialized decoder.
 /// You always need to call `om_decoder_init` before using the decoder!
 pub unsafe fn create_uninit_decoder() -> OmDecoder_t {
-    std::mem::zeroed()
+    unsafe { std::mem::zeroed() }
 }
 
 /// Create an uninitialized encoder.
 /// You always need to call `om_encoder_init` before using the encoder!
 pub unsafe fn create_uninit_encoder() -> OmEncoder_t {
-    std::mem::zeroed()
+    unsafe { std::mem::zeroed() }
 }
 
 pub fn new_index_read(decoder: &OmDecoder_t) -> OmDecoder_indexRead_t {
