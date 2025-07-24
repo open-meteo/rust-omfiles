@@ -3,11 +3,11 @@ use crate::errors::OmFilesRsError;
 use crate::utils::divide_rounded_up;
 
 /// All data is written to a buffer before flushed to a backend
-pub struct OmBufferedWriter<FileHandle: OmFileWriterBackend> {
+pub struct OmBufferedWriter<Backend: OmFileWriterBackend> {
     /// All data is written to this buffer
     buffer: Vec<u8>,
     /// The final backing store to write data to
-    pub backend: FileHandle,
+    pub backend: Backend,
     /// Current write position in buffer
     pub write_position: usize,
     /// Total bytes written including flushed data
@@ -16,8 +16,8 @@ pub struct OmBufferedWriter<FileHandle: OmFileWriterBackend> {
     pub initial_capacity: usize,
 }
 
-impl<FileHandle: OmFileWriterBackend> OmBufferedWriter<FileHandle> {
-    pub fn new(backend: FileHandle, initial_capacity: usize) -> Self {
+impl<Backend: OmFileWriterBackend> OmBufferedWriter<Backend> {
+    pub fn new(backend: Backend, initial_capacity: usize) -> Self {
         Self {
             buffer: vec![0; initial_capacity],
             backend,
@@ -52,7 +52,7 @@ impl<FileHandle: OmFileWriterBackend> OmBufferedWriter<FileHandle> {
 
     /// How many bytes are left in the write buffer
     pub fn remaining_capacity(&self) -> usize {
-        self.buffer.capacity() - self.write_position
+        self.buffer.len() - self.write_position
     }
 
     /// Get a mutable slice to the current write position
@@ -73,7 +73,7 @@ impl<FileHandle: OmFileWriterBackend> OmBufferedWriter<FileHandle> {
 
         self.write_to_file()?;
 
-        if self.buffer.capacity() >= minimum_capacity {
+        if self.buffer.len() >= minimum_capacity {
             return Ok(());
         }
 
@@ -103,7 +103,7 @@ impl<FileHandle: OmFileWriterBackend> OmBufferedWriter<FileHandle> {
     }
 }
 
-impl<FileHandle: OmFileWriterBackend> Drop for OmBufferedWriter<FileHandle> {
+impl<Backend: OmFileWriterBackend> Drop for OmBufferedWriter<Backend> {
     fn drop(&mut self) {
         // Vec handles cleanup automatically
     }

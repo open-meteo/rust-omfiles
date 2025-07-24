@@ -1,438 +1,437 @@
-use crate::backend::backends::{InMemoryBackend, OmFileWriterBackend};
-use crate::core::compression::{p4nenc256_bound, CompressionType};
-use crate::core::delta2d::{delta2d_encode, delta2d_encode_xor};
-use crate::core::dimensions::Dimensions;
-use crate::core::header::OmHeader;
+use crate::backend::backends::OmFileWriterBackend;
+use crate::core::c_defaults::{c_error_string, create_uninit_encoder};
+use crate::core::compression::CompressionType;
+use crate::core::data_types::{DataType, OmFileArrayDataType, OmFileScalarDataType, OmNone};
 use crate::errors::OmFilesRsError;
-use crate::io::aligned_buffer::{as_bytes, as_typed_slice_mut, AlignToSixtyFour};
-use crate::utils::divide_rounded_up;
-use std::fs::File;
-use std::path::Path;
-use std::rc::Rc;
-// use turbo_pfor_sys::{fpxenc32, p4nzenc128v16};
-use omfileformatc_rs::{fpxenc32, p4nzenc128v16};
+use crate::io::buffered_writer::OmBufferedWriter;
+use ndarray::ArrayViewD;
+use om_file_format_sys::{
+    OmEncoder_t, OmError_t, om_encoder_chunk_buffer_size, om_encoder_compress_chunk,
+    om_encoder_compress_lut, om_encoder_compressed_chunk_buffer_size, om_encoder_count_chunks,
+    om_encoder_count_chunks_in_array, om_encoder_init, om_encoder_lut_buffer_size, om_header_write,
+    om_header_write_size, om_trailer_size, om_trailer_write, om_variable_write_numeric_array,
+    om_variable_write_numeric_array_size, om_variable_write_scalar, om_variable_write_scalar_size,
+};
+use std::borrow::BorrowMut;
+use std::marker::PhantomData;
+use std::os::raw::c_void;
 
-/// Writer for OM files.
-/// The format currently looks like this:
-/// - 2 bytes magic number: 0x4F4D (79 77) "OM"
-/// - 1 byte version: 2
-/// - 1 byte compression type with filter
-/// - 4 bytes scale factor
-/// - 8 bytes dim0 (slow)
-/// - 8 bytes dim1 (fast)
-/// - 8 bytes chunk dim0
-/// - 8 bytes chunk dim1
-/// - Reserve space for reference table
-/// - Data blocks
-pub struct OmFileWriter {
-    pub dim0: usize,
-    pub dim1: usize,
-    pub chunk0: usize,
-    pub chunk1: usize,
+#[derive(Debug, Clone, PartialEq)]
+pub struct OmOffsetSize {
+    pub offset: u64,
+    pub size: u64,
 }
 
-impl OmFileWriter {
-    pub fn new(dim0: usize, dim1: usize, chunk0: usize, chunk1: usize) -> Self {
+impl OmOffsetSize {
+    pub fn new(offset: u64, size: u64) -> Self {
+        Self { offset, size }
+    }
+}
+
+pub struct OmFileWriter<Backend: OmFileWriterBackend> {
+    buffer: OmBufferedWriter<Backend>,
+}
+
+impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
+    pub fn new(backend: Backend, initial_capacity: u64) -> Self {
         Self {
-            dim0,
-            dim1,
-            chunk0,
-            chunk1,
+            buffer: OmBufferedWriter::new(backend, initial_capacity as usize),
         }
     }
 
-    /// Write new or overwrite new compressed file.
-    /// Data must be supplied by a closure which returns the current position in dimension 0.
-    /// Typically this is the location offset.
-    /// The closure must return either an even number of elements of chunk1 * dim1 or all the
-    /// remaining elements in the last chunk.
-    ///
-    /// One chunk should be around 2'000 or 16'000 elements. Fewer or more are not useful.
-    /// If fsync is true, the file is synchronized after every 32 MB of data.
-    ///
-    /// Note: chunk0 can be an uneven multiple of dim0, e.g. for 10 locations we can use
-    /// chunks of 3, so that the last chunk will only cover 1 location.
-    pub fn write<'a, Backend: OmFileWriterBackend>(
-        &self,
-        backend: Backend,
-        compression_type: CompressionType,
-        scale_factor: f32,
-        fsync: bool,
-        supply_chunk: impl Fn(usize) -> Result<Rc<Vec<f32>>, OmFilesRsError>,
-    ) -> Result<(), OmFilesRsError> {
-        let mut state = OmFileWriterState::new(
-            backend,
-            self.dim0,
-            self.dim1,
-            self.chunk0,
-            self.chunk1,
-            compression_type,
-            scale_factor,
-            fsync,
-        )?;
-
-        state.write_header()?;
-        while state.c0 < state.dimensions.n_dim0_chunks() {
-            let uncompressed_input = supply_chunk(state.c0 * state.dimensions.chunk0)?;
-            state.write(&uncompressed_input)?;
+    pub fn write_header_if_required(&mut self) -> Result<(), OmFilesRsError> {
+        if self.buffer.total_bytes_written > 0 {
+            return Ok(());
         }
-        state.write_tail()?;
-
+        let size = unsafe { om_header_write_size() };
+        self.buffer.reallocate(size as usize)?;
+        unsafe {
+            om_header_write(self.buffer.buffer_at_write_position().as_mut_ptr() as *mut c_void);
+        }
+        self.buffer.increment_write_position(size as usize);
         Ok(())
     }
 
-    pub fn write_to_file<'a>(
-        &self,
-        file: &str,
-        compression_type: CompressionType,
-        scale_factor: f32,
-        overwrite: bool,
-        supply_chunk: impl Fn(usize) -> Result<Rc<Vec<f32>>, OmFilesRsError>,
-    ) -> Result<File, OmFilesRsError> {
-        if !overwrite && Path::new(file).exists() {
-            return Err(OmFilesRsError::FileExistsAlready {
-                filename: file.to_string(),
-            });
-        }
-        let file_temp = format!("{}~", file);
-        if Path::new(&file_temp).exists() {
-            std::fs::remove_file(&file_temp).map_err(|e| OmFilesRsError::CannotOpenFile {
-                filename: file_temp.clone(),
-                errno: e.raw_os_error().unwrap_or(0),
-                error: e.to_string(),
-            })?;
-        }
-        let file_handle = File::create(&file_temp).map_err(|e| OmFilesRsError::CannotOpenFile {
-            filename: file_temp.clone(),
-            errno: e.raw_os_error().unwrap_or(0),
-            error: e.to_string(),
+    pub fn write_scalar<T: OmFileScalarDataType>(
+        &mut self,
+        value: T,
+        name: &str,
+        children: &[OmOffsetSize],
+    ) -> Result<OmOffsetSize, OmFilesRsError> {
+        self.write_header_if_required()?;
+
+        assert!(name.len() <= u16::MAX as usize);
+        assert!(children.len() <= u32::MAX as usize);
+
+        let type_scalar = T::DATA_TYPE_SCALAR.to_c();
+        let children_offsets: Vec<u64> = children.iter().map(|c| c.offset).collect();
+        let children_sizes: Vec<u64> = children.iter().map(|c| c.size).collect();
+        // Align to 64 bytes before writing
+        self.buffer.align_to_64_bytes()?;
+        let offset = self.buffer.total_bytes_written as u64;
+
+        let size = value.with_raw_bytes(|bytes| -> Result<usize, OmFilesRsError> {
+            let size = unsafe {
+                om_variable_write_scalar_size(
+                    name.len() as u16,
+                    children.len() as u32,
+                    type_scalar,
+                    bytes.len() as u64,
+                )
+            };
+
+            self.buffer.reallocate(size)?;
+
+            unsafe {
+                om_variable_write_scalar(
+                    self.buffer.buffer_at_write_position().as_mut_ptr() as *mut c_void,
+                    name.len() as u16,
+                    children.len() as u32,
+                    children_offsets.as_ptr(),
+                    children_sizes.as_ptr(),
+                    name.as_ptr() as *const ::std::os::raw::c_char,
+                    type_scalar,
+                    bytes.as_ptr() as *const c_void,
+                    bytes.len(),
+                )
+            };
+
+            self.buffer.increment_write_position(size);
+
+            Ok(size)
         })?;
-        self.write(
-            &file_handle,
-            compression_type,
-            scale_factor,
-            true,
-            supply_chunk,
-        )?;
-        std::fs::rename(&file_temp, file).map_err(|e| OmFilesRsError::CannotOpenFile {
-            filename: file_temp,
-            errno: e.raw_os_error().unwrap_or(0),
-            error: e.to_string(),
-        })?;
-        Ok(file_handle)
+
+        Ok(OmOffsetSize::new(offset, size as u64))
     }
 
-    pub fn write_all_to_file(
-        &self,
-        file: &str,
-        compression_type: CompressionType,
-        scale_factor: f32,
-        all: Rc<Vec<f32>>,
-        overwrite: bool,
-    ) -> Result<File, OmFilesRsError> {
-        self.write_to_file(file, compression_type, scale_factor, overwrite, |_| {
-            Ok(all.clone())
-        })
+    pub fn write_none(
+        &mut self,
+        name: &str,
+        children: &[OmOffsetSize],
+    ) -> Result<OmOffsetSize, OmFilesRsError> {
+        // Use write_scalar with OmNone
+        self.write_scalar(OmNone::default(), name, children)
     }
 
-    pub fn write_in_memory<'a>(
-        &self,
-        compression_type: CompressionType,
-        scale_factor: f32,
-        supply_chunk: impl Fn(usize) -> Result<Rc<Vec<f32>>, OmFilesRsError>,
-    ) -> Result<InMemoryBackend, OmFilesRsError> {
-        let mut data = InMemoryBackend::new(Vec::new());
-        self.write(
-            &mut data,
-            compression_type,
-            scale_factor,
-            true,
-            supply_chunk,
-        )?;
-        Ok(data)
-    }
-
-    pub fn write_all_in_memory(
-        &self,
-        compression_type: CompressionType,
-        scale_factor: f32,
-        all: Rc<Vec<f32>>,
-    ) -> Result<InMemoryBackend, OmFilesRsError> {
-        self.write_in_memory(compression_type, scale_factor, |_| Ok(all.clone()))
-    }
-}
-
-pub struct OmFileWriterState<Backend: OmFileWriterBackend> {
-    pub backend: Backend,
-
-    pub dimensions: Dimensions,
-
-    pub compression: CompressionType,
-    pub scale_factor: f32,
-
-    /// Buffer where chunks are moved to, before compressing them.
-    /// -> Input for compression call
-    read_buffer: AlignToSixtyFour,
-
-    /// Compressed chunks are written into this buffer.
-    /// 1 MB write buffer or larger if chunks are very large.
-    write_buffer: AlignToSixtyFour,
-
-    pub bytes_written_since_last_flush: usize,
-
-    write_buffer_pos: usize,
-
-    /// Number of bytes after data should be flushed with fsync
-    pub fsync_flush_size: Option<usize>,
-
-    /// Position of last written chunk in dimension 0
-    c0: usize,
-
-    /// Stores all byte offsets where our compressed chunks start.
-    /// Later, we want to decompress chunk 1234 and know it starts at
-    /// byte offset 5346545.
-    chunk_offset_bytes: Vec<u64>,
-}
-
-impl<Backend: OmFileWriterBackend> OmFileWriterState<Backend> {
-    pub fn new(
-        backend: Backend,
-        dim0: usize,
-        dim1: usize,
-        chunk0: usize,
-        chunk1: usize,
+    pub fn prepare_array<T: OmFileArrayDataType>(
+        &mut self,
+        dimensions: Vec<u64>,
+        chunk_dimensions: Vec<u64>,
         compression: CompressionType,
         scale_factor: f32,
-        fsync: bool,
-    ) -> Result<Self, OmFilesRsError> {
-        if chunk0 == 0 || chunk1 == 0 || dim0 == 0 || dim1 == 0 {
-            return Err(OmFilesRsError::DimensionMustBeLargerThan0);
-        }
-        if chunk0 > dim0 || chunk1 > dim1 {
-            return Err(OmFilesRsError::ChunkDimensionIsSmallerThanOverallDim);
-        }
+        add_offset: f32,
+    ) -> Result<OmFileWriterArray<T, Backend>, OmFilesRsError> {
+        let _ = &self.write_header_if_required()?;
 
-        let chunk_size_byte = chunk0 * chunk1 * 4;
-        if chunk_size_byte > 1024 * 1024 * 4 {
-            println!(
-                "WARNING: Chunk size greater than 4 MB ({} MB)!",
-                chunk_size_byte as f32 / 1024.0 / 1024.0
+        let array_writer = OmFileWriterArray::new(
+            dimensions,
+            chunk_dimensions,
+            compression,
+            T::DATA_TYPE_ARRAY,
+            scale_factor,
+            add_offset,
+            self.buffer.borrow_mut(),
+        )?;
+
+        Ok(array_writer)
+    }
+
+    pub fn write_array(
+        &mut self,
+        array: OmFileWriterArrayFinalized,
+        name: &str,
+        children: &[OmOffsetSize],
+    ) -> Result<OmOffsetSize, OmFilesRsError> {
+        self.write_header_if_required()?;
+
+        debug_assert!(name.len() <= u16::MAX as usize);
+        debug_assert_eq!(array.dimensions.len(), array.chunks.len());
+
+        let size = unsafe {
+            om_variable_write_numeric_array_size(
+                name.len() as u16,
+                children.len() as u32,
+                array.dimensions.len() as u64,
+            )
+        };
+        self.buffer.align_to_64_bytes()?;
+
+        let offset = self.buffer.total_bytes_written as u64;
+
+        self.buffer.reallocate(size)?;
+
+        let children_offsets: Vec<u64> = children.iter().map(|c| c.offset).collect();
+        let children_sizes: Vec<u64> = children.iter().map(|c| c.size).collect();
+        unsafe {
+            om_variable_write_numeric_array(
+                self.buffer.buffer_at_write_position().as_mut_ptr() as *mut c_void,
+                name.len() as u16,
+                children.len() as u32,
+                children_offsets.as_ptr(),
+                children_sizes.as_ptr(),
+                name.as_ptr() as *const ::std::os::raw::c_char,
+                array.data_type.to_c(),
+                array.compression.to_c(),
+                array.scale_factor,
+                array.add_offset,
+                array.dimensions.len() as u64,
+                array.dimensions.as_ptr(),
+                array.chunks.as_ptr(),
+                array.lut_size,
+                array.lut_offset,
+            )
+        };
+
+        self.buffer.increment_write_position(size);
+        Ok(OmOffsetSize::new(offset, size as u64))
+    }
+
+    pub fn write_trailer(&mut self, root_variable: OmOffsetSize) -> Result<(), OmFilesRsError> {
+        self.write_header_if_required()?;
+        self.buffer.align_to_64_bytes()?;
+
+        let size = unsafe { om_trailer_size() };
+        self.buffer.reallocate(size)?;
+        unsafe {
+            om_trailer_write(
+                self.buffer.buffer_at_write_position().as_mut_ptr() as *mut c_void,
+                root_variable.offset,
+                root_variable.size,
             );
         }
+        self.buffer.increment_write_position(size);
 
-        let buffer_size = p4nenc256_bound(chunk0 * chunk1, 4);
+        self.buffer.write_to_file()
+    }
+}
 
-        let dimensions = Dimensions::new(dim0, dim1, chunk0, chunk1);
-        let chunk_offset_length = dimensions.chunk_offset_length();
+pub struct OmFileWriterArray<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend> {
+    look_up_table: Vec<u64>,
+    encoder: OmEncoder_t,
+    chunk_index: u64,
+    scale_factor: f32,
+    add_offset: f32,
+    compression: CompressionType,
+    data_type: PhantomData<OmType>,
+    dimensions: Vec<u64>,
+    chunks: Vec<u64>,
+    compressed_chunk_buffer_size: u64,
+    chunk_buffer: Vec<u8>,
+    buffer: &'a mut OmBufferedWriter<Backend>,
+}
+
+impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
+    OmFileWriterArray<'a, OmType, Backend>
+{
+    /// `lut_chunk_element_count` should be 256 for production files.
+    pub fn new(
+        dimensions: Vec<u64>,
+        chunk_dimensions: Vec<u64>,
+        compression: CompressionType,
+        data_type: DataType,
+        scale_factor: f32,
+        add_offset: f32,
+        buffer: &'a mut OmBufferedWriter<Backend>,
+    ) -> Result<Self, OmFilesRsError> {
+        if data_type != OmType::DATA_TYPE_ARRAY {
+            return Err(OmFilesRsError::InvalidDataType);
+        }
+        if dimensions.len() != chunk_dimensions.len() {
+            return Err(OmFilesRsError::MismatchingCubeDimensionLength);
+        }
+
+        let chunks = chunk_dimensions;
+
+        let mut encoder = unsafe { create_uninit_encoder() };
+        let error = unsafe {
+            om_encoder_init(
+                &mut encoder,
+                scale_factor,
+                add_offset,
+                compression.to_c(),
+                data_type.to_c(),
+                dimensions.as_ptr(),
+                chunks.as_ptr(),
+                dimensions.len() as u64,
+            )
+        };
+        if error != OmError_t::ERROR_OK {
+            return Err(OmFilesRsError::FileWriterError {
+                errno: error as i32,
+                error: c_error_string(error),
+            });
+        }
+
+        let n_chunks = unsafe { om_encoder_count_chunks(&encoder) } as usize;
+        let compressed_chunk_buffer_size =
+            unsafe { om_encoder_compressed_chunk_buffer_size(&encoder) };
+        let chunk_buffer_size = unsafe { om_encoder_chunk_buffer_size(&encoder) } as usize;
+
+        let chunk_buffer = vec![0u8; chunk_buffer_size];
+        let look_up_table = vec![0u64; n_chunks + 1];
+
         Ok(Self {
-            backend,
-            dimensions,
-            compression,
+            look_up_table,
+            encoder,
+            chunk_index: 0,
             scale_factor,
-            read_buffer: AlignToSixtyFour::new(buffer_size as usize),
-            write_buffer: AlignToSixtyFour::new(std::cmp::max(1024 * 1024, buffer_size as usize)),
-            bytes_written_since_last_flush: 0,
-            write_buffer_pos: 0,
-            fsync_flush_size: if fsync { Some(32 * 1024 * 1024) } else { None },
-            c0: 0,
-            chunk_offset_bytes: Vec::with_capacity(chunk_offset_length as usize),
+            add_offset,
+            compression,
+            data_type: PhantomData,
+            dimensions,
+            chunks,
+            compressed_chunk_buffer_size,
+            chunk_buffer,
+            buffer,
         })
     }
 
-    pub fn write_header(&mut self) -> Result<(), OmFilesRsError> {
-        let header = OmHeader {
-            magic_number1: OmHeader::MAGIC_NUMBER1,
-            magic_number2: OmHeader::MAGIC_NUMBER2,
-            version: OmHeader::VERSION,
-            compression: self.compression,
-            scale_factor: self.scale_factor,
-            dim0: self.dimensions.dim0 as u64,
-            dim1: self.dimensions.dim1 as u64,
-            chunk0: self.dimensions.chunk0 as u64,
-            chunk1: self.dimensions.chunk1 as u64,
-        };
-
-        // write the header to the file
-        let header_bytes = header.as_bytes();
-        self.backend.write(header_bytes.as_slice())?;
-
-        // write empty chunk offset table
-        let zero_bytes = vec![0; self.dimensions.chunk_offset_length() as usize];
-        self.backend.write(&zero_bytes)?;
-
-        Ok(())
-    }
-
-    pub fn write_tail(&mut self) -> Result<(), OmFilesRsError> {
-        // write remaining data from buffer
-        self.backend
-            .write(&self.write_buffer[..self.write_buffer_pos as usize])?;
-
-        // write trailing byte to allow the encoder to read with 256 bit alignment
-        let trailing_bytes = p4nenc256_bound(0, 4);
-        let trailing_data = vec![0; trailing_bytes as usize];
-        self.backend.write(&trailing_data)?;
-
-        let chunk_offset_bytes = as_bytes(self.chunk_offset_bytes.as_slice());
-
-        // write chunk_offsets dictionary after the header,
-        // we initially wrote zeros in these places!
-        self.backend
-            .write_at(chunk_offset_bytes, OmHeader::LENGTH)?;
-
-        if let Some(_fsync_flush_size) = self.fsync_flush_size {
-            self.backend.synchronize()?;
-        }
-
-        Ok(())
-    }
-
-    pub fn write(&mut self, uncompressed_input: &[f32]) -> Result<(), OmFilesRsError> {
-        match self.compression {
-            CompressionType::P4nzdec256 => {
-                let scale_factor = self.scale_factor;
-                self.write_compressed::<i16, _, _, _>(
-                    uncompressed_input,
-                    |val| {
-                        if val.is_nan() {
-                            i16::MAX
-                        } else {
-                            let scaled = val * scale_factor;
-                            scaled.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16
-                        }
-                    },
-                    delta2d_encode,
-                    |a0, a1, a2| unsafe {
-                        p4nzenc128v16(a0.as_mut_ptr() as *mut u16, a1, a2.as_mut_ptr())
-                    },
-                )
-            }
-            CompressionType::Fpxdec32 => self.write_compressed::<f32, _, _, _>(
-                uncompressed_input,
-                |val| *val,
-                delta2d_encode_xor,
-                |a0, a1, a2| unsafe {
-                    fpxenc32(a0.as_mut_ptr() as *mut u32, a1, a2.as_mut_ptr(), 0)
-                },
-            ),
-            CompressionType::P4nzdec256logarithmic => {
-                let scale_factor = self.scale_factor;
-                self.write_compressed::<i16, _, _, _>(
-                    uncompressed_input,
-                    |val| {
-                        if val.is_nan() {
-                            i16::MAX
-                        } else {
-                            let scaled = (val + 1.0).log10() * scale_factor;
-                            scaled.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16
-                        }
-                    },
-                    delta2d_encode,
-                    |a0, a1, a2| unsafe {
-                        p4nzenc128v16(a0.as_mut_ptr() as *mut u16, a1, a2.as_mut_ptr())
-                    },
-                )
-            }
-        }
-    }
-
-    pub fn write_compressed<T, F, G, H>(
+    /// Writes an ndarray to the file.
+    pub fn write_data(
         &mut self,
-        uncompressed_input: &[f32],
-        scaler_conversion: H,
-        delta2d_encode_function: G,
-        compression_function: F,
-    ) -> Result<(), OmFilesRsError>
-    where
-        F: Fn(&mut [T], usize, &mut [u8]) -> usize,
-        G: Fn(usize, usize, &mut [T]),
-        H: Fn(&f32) -> T,
-    {
-        let read_buffer_length = self.read_buffer.len();
-        let n_dim1_chunks = self.dimensions.n_dim1_chunks();
+        array: ArrayViewD<OmType>,
+        array_offset: Option<&[u64]>,
+        array_count: Option<&[u64]>,
+    ) -> Result<(), OmFilesRsError> {
+        let array_dimensions = array
+            .shape()
+            .iter()
+            .map(|&x| x as u64)
+            .collect::<Vec<u64>>();
+        let array = array.as_slice().ok_or(OmFilesRsError::ArrayNotContiguous)?;
+        self.write_data_flat(array, Some(&array_dimensions), array_offset, array_count)
+    }
 
-        let mut buffer = as_typed_slice_mut::<T, u8>(self.read_buffer.as_mut_slice());
+    /// Compresses data and writes it to file.
+    pub fn write_data_flat(
+        &mut self,
+        array: &[OmType],
+        array_dimensions: Option<&[u64]>,
+        array_offset: Option<&[u64]>,
+        array_count: Option<&[u64]>,
+    ) -> Result<(), OmFilesRsError> {
+        let array_dimensions = array_dimensions.unwrap_or(&self.dimensions);
+        let default_offset = vec![0; array_dimensions.len()];
+        let array_offset = array_offset.unwrap_or(default_offset.as_slice());
+        let array_count = array_count.unwrap_or(array_dimensions);
 
-        let elements_per_chunk_row = self.dimensions.elements_per_chunk_row();
-        let missing_elements =
-            self.dimensions.dim0 * self.dimensions.dim1 - self.c0 * elements_per_chunk_row;
-
-        if missing_elements < elements_per_chunk_row {
-            // For the last chunk, the number must match exactly
-            if uncompressed_input.len() != missing_elements as usize {
+        if array_count.len() != self.dimensions.len() {
+            return Err(OmFilesRsError::ChunkHasWrongNumberOfElements);
+        }
+        for (array_dim, max_dim) in array_count.iter().zip(self.dimensions.iter()) {
+            if array_dim > max_dim {
                 return Err(OmFilesRsError::ChunkHasWrongNumberOfElements);
             }
         }
 
-        let is_even_multiple_of_chunk_size = uncompressed_input.len() % elements_per_chunk_row == 0;
-        if !is_even_multiple_of_chunk_size && uncompressed_input.len() != missing_elements {
+        let array_size: u64 = array_dimensions.iter().product::<u64>();
+        if array.len() as u64 != array_size {
             return Err(OmFilesRsError::ChunkHasWrongNumberOfElements);
         }
-
-        let n_read_chunks = divide_rounded_up(uncompressed_input.len(), elements_per_chunk_row);
-
-        for c00 in 0..n_read_chunks {
-            let length0 = std::cmp::min(
-                (self.c0 + c00 + 1) * self.dimensions.chunk0,
-                self.dimensions.dim0,
-            ) - (self.c0 + c00) * self.dimensions.chunk0;
-
-            for c1 in 0..n_dim1_chunks {
-                // load chunk into buffer
-                // consider the length, even if the last is only partial!
-                // E.g. at 1000 elements with 600 chunk length, the last one is only 400
-                let length1 =
-                    std::cmp::min((c1 + 1) * self.dimensions.chunk1, self.dimensions.dim1)
-                        - c1 * self.dimensions.chunk1;
-
-                for d0 in 0..length0 {
-                    // FIXME: elements_per_chunk_row potentially not correct here
-                    let start = c1 * self.dimensions.chunk1
-                        + d0 * self.dimensions.dim1
-                        + c00 * elements_per_chunk_row; // FIXME: + uncompressedInput.startIndex ??
-                    let range_buffer = d0 * length1..(d0 + 1) * length1;
-                    let range_input = start..start + length1;
-
-                    for (pos_buffer, pos_input) in range_buffer.zip(range_input) {
-                        let val = uncompressed_input[pos_input as usize];
-                        buffer[pos_buffer as usize] = scaler_conversion(&val);
-                    }
-                }
-                delta2d_encode_function(length0, length1, &mut buffer);
-
-                // encoding functions have the following form
-                // size_t compressed_size = encode( unsigned *in, size_t n, char *out)
-                // compressed_size : number of bytes written into compressed output buffer out
-                let write_length = compression_function(
-                    buffer,
-                    (length1 * length0) as usize,
-                    self.write_buffer[self.write_buffer_pos as usize..].as_mut(),
-                );
-
-                // If the write_buffer is too full, write it to the backend
-                // Too full means, that the next compressed chunk may not fit into the buffer
-                self.write_buffer_pos += write_length;
-                if self.write_buffer.len() - (self.write_buffer_pos as usize) < read_buffer_length {
-                    self.backend
-                        .write(&self.write_buffer[..self.write_buffer_pos as usize])?;
-                    if let Some(fsync_flush_size) = self.fsync_flush_size {
-                        self.bytes_written_since_last_flush += self.write_buffer_pos;
-                        if self.bytes_written_since_last_flush >= fsync_flush_size {
-                            // Make sure to write to disk, otherwise we get a
-                            // lot of dirty pages and might overload kernel page cache
-                            self.backend.synchronize()?;
-                            self.bytes_written_since_last_flush = 0;
-                        }
-                    }
-                    self.write_buffer_pos = 0;
-                }
-
-                // Store chunk offset position in our lookup table
-                let previous = *self.chunk_offset_bytes.last().unwrap_or(&0);
-                self.chunk_offset_bytes.push(previous + write_length as u64);
+        for (dim, (offset, count)) in array_dimensions
+            .iter()
+            .zip(array_offset.iter().zip(array_count.iter()))
+        {
+            if offset + count > *dim {
+                return Err(OmFilesRsError::OffsetAndCountExceedDimension {
+                    offset: *offset,
+                    count: *count,
+                    dimension: *dim,
+                });
             }
         }
-        self.c0 += n_read_chunks;
+
+        self.buffer
+            .reallocate(self.compressed_chunk_buffer_size as usize * 4)?;
+
+        let number_of_chunks_in_array =
+            unsafe { om_encoder_count_chunks_in_array(&mut self.encoder, array_count.as_ptr()) };
+
+        if self.chunk_index == 0 {
+            self.look_up_table[self.chunk_index as usize] = self.buffer.total_bytes_written as u64;
+        }
+
+        // This loop could be parallelized. However, the order of chunks must
+        // remain the same in the LUT and final output buffer.
+        // For multithreading, we would need multiple buffers that need to be
+        // copied into the final buffer in the correct order after compression.
+        for chunk_offset in 0..number_of_chunks_in_array {
+            self.buffer
+                .reallocate(self.compressed_chunk_buffer_size as usize)?;
+
+            let bytes_written = unsafe {
+                om_encoder_compress_chunk(
+                    &mut self.encoder,
+                    array.as_ptr() as *const c_void,
+                    array_dimensions.as_ptr(),
+                    array_offset.as_ptr(),
+                    array_count.as_ptr(),
+                    self.chunk_index,
+                    chunk_offset,
+                    self.buffer.buffer_at_write_position().as_mut_ptr(),
+                    self.chunk_buffer.as_mut_ptr(),
+                )
+            };
+
+            self.buffer.increment_write_position(bytes_written as usize);
+
+            self.look_up_table[(self.chunk_index + 1) as usize] =
+                self.buffer.total_bytes_written as u64;
+            self.chunk_index += 1;
+        }
+
         Ok(())
     }
+
+    /// Compress the lookup table and write it to the output buffer.
+    pub fn write_lut(&mut self) -> u64 {
+        let buffer_size = unsafe {
+            om_encoder_lut_buffer_size(self.look_up_table.as_ptr(), self.look_up_table.len() as u64)
+        };
+
+        self.buffer
+            .reallocate(buffer_size as usize)
+            .expect("Failed to reallocate buffer");
+
+        let compressed_lut_size = unsafe {
+            om_encoder_compress_lut(
+                self.look_up_table.as_ptr(),
+                self.look_up_table.len() as u64,
+                self.buffer.buffer_at_write_position().as_mut_ptr(),
+                buffer_size,
+            )
+        };
+
+        self.buffer
+            .increment_write_position(compressed_lut_size as usize);
+        compressed_lut_size
+    }
+
+    /// Finalize the array and return the finalized struct.
+    pub fn finalize(mut self) -> OmFileWriterArrayFinalized {
+        let lut_offset = self.buffer.total_bytes_written as u64;
+        let lut_size = self.write_lut();
+
+        OmFileWriterArrayFinalized {
+            scale_factor: self.scale_factor,
+            add_offset: self.add_offset,
+            compression: self.compression,
+            data_type: OmType::DATA_TYPE_ARRAY,
+            dimensions: self.dimensions.clone(),
+            chunks: self.chunks.clone(),
+            lut_size,
+            lut_offset,
+        }
+    }
+}
+
+pub struct OmFileWriterArrayFinalized {
+    pub scale_factor: f32,
+    pub add_offset: f32,
+    pub compression: CompressionType,
+    pub data_type: DataType,
+    pub dimensions: Vec<u64>,
+    pub chunks: Vec<u64>,
+    pub lut_size: u64,
+    pub lut_offset: u64,
 }
