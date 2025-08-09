@@ -1,4 +1,4 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use ndarray::{Array, ArrayViewD};
 use omfiles::{
     backend::{
@@ -12,6 +12,7 @@ use rand::Rng;
 use std::{
     borrow::BorrowMut,
     fs::{self, File},
+    hint::black_box,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -119,8 +120,8 @@ pub fn benchmark_read(c: &mut Criterion) {
 
     group.bench_function("read_om_file", move |b| {
         b.iter(|| {
-            let random_x: u64 = rand::thread_rng().gen_range(0..DIM0_SIZE - dim0_read_size);
-            let random_y: u64 = rand::thread_rng().gen_range(0..DIM1_SIZE);
+            let random_x: u64 = rand::rng().random_range(0..DIM0_SIZE - dim0_read_size);
+            let random_y: u64 = rand::rng().random_range(0..DIM1_SIZE);
             let values = reader
                 .read::<f32>(
                     &[random_x..random_x + dim0_read_size, random_y..random_y + 1],
