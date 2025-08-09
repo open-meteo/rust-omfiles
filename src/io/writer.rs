@@ -113,14 +113,14 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         self.write_scalar(OmNone::default(), name, children)
     }
 
-    pub fn prepare_array<T: OmFileArrayDataType>(
-        &mut self,
+    pub fn prepare_array<'a, T: OmFileArrayDataType>(
+        &'a mut self,
         dimensions: Vec<u64>,
         chunk_dimensions: Vec<u64>,
         compression: CompressionType,
         scale_factor: f32,
         add_offset: f32,
-    ) -> Result<OmFileWriterArray<T, Backend>, OmFilesRsError> {
+    ) -> Result<OmFileWriterArray<'a, T, Backend>, OmFilesRsError> {
         let _ = &self.write_header_if_required()?;
 
         let array_writer = OmFileWriterArray::new(
