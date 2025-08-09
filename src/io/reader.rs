@@ -4,6 +4,7 @@ use crate::core::data_types::OmFileArrayDataType;
 use crate::errors::OmFilesRsError;
 use crate::implement_variable_methods;
 use crate::io::reader_utils::process_trailer;
+use crate::io::tree_navigator::{MetadataCache, TreeNavigator, TreeNavigatorInternal};
 use crate::io::variable::OmVariableContainer;
 use crate::io::writer::OmOffsetSize;
 use ndarray::ArrayD;
@@ -17,11 +18,13 @@ use std::ops::Range;
 use std::os::raw::c_void;
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct OmFileReader<Backend> {
     /// The backend that provides data via the get_bytes method
     pub backend: Arc<Backend>,
     /// The variable containing metadata and access methods
     pub variable: OmVariableContainer,
+    metadata_cache: MetadataCache<OmOffsetSize>,
 }
 
 // implement utility methods for OmFileReader
@@ -62,6 +65,7 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
         Ok(Self {
             backend,
             variable: OmVariableContainer::new(variable_data, offset_size),
+            metadata_cache: MetadataCache::default(),
         })
     }
 
@@ -109,19 +113,14 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
     }
 
     pub fn get_child(&self, index: u32) -> Option<Self> {
-        let mut offset = 0u64;
-        let mut size = 0u64;
-        if !unsafe {
-            om_variable_get_children(*self.variable.variable, index, 1, &mut offset, &mut size)
-        } {
-            return None;
+        if let Some(offset_size) = self.get_child_metadata(index) {
+            let child = self
+                .init_child_from_offset_size(offset_size)
+                .expect("Failed to init child");
+            Some(child)
+        } else {
+            None
         }
-
-        let offset_size = OmOffsetSize::new(offset, size);
-        let child = self
-            .init_child_from_offset_size(offset_size)
-            .expect("Failed to init child");
-        Some(child)
     }
 
     pub fn init_child_from_offset_size(
@@ -136,6 +135,7 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
         Ok(Self {
             backend: self.backend.clone(),
             variable: OmVariableContainer::new(child_variable, Some(offset_size)),
+            metadata_cache: MetadataCache::default(),
         })
     }
 
@@ -188,6 +188,41 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
         )?;
 
         Ok(out)
+    }
+}
+
+impl<Backend: OmFileReaderBackend> TreeNavigator for OmFileReader<Backend> {}
+
+impl<Backend: OmFileReaderBackend> TreeNavigatorInternal for OmFileReader<Backend> {
+    type ChildMetadata = OmOffsetSize;
+    type Cache = MetadataCache<OmOffsetSize>;
+
+    fn get_name(&self) -> Option<String> {
+        self.get_name()
+    }
+
+    fn number_of_children(&self) -> u32 {
+        self.number_of_children()
+    }
+
+    fn get_child_metadata(&self, index: u32) -> Option<Self::ChildMetadata> {
+        let mut offset = 0u64;
+        let mut size = 0u64;
+        if unsafe {
+            om_variable_get_children(*self.variable.variable, index, 1, &mut offset, &mut size)
+        } {
+            Some(OmOffsetSize::new(offset, size))
+        } else {
+            None
+        }
+    }
+
+    fn create_child_from_metadata(&self, metadata: &Self::ChildMetadata) -> Option<Self> {
+        self.init_child_from_offset_size(metadata.clone()).ok()
+    }
+
+    fn cache(&self) -> &Self::Cache {
+        &self.metadata_cache
     }
 }
 

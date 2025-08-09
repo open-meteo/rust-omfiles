@@ -1,10 +1,11 @@
 use macro_rules_attribute::apply;
-use ndarray::{Array2, ArrayD, ArrayViewD, s};
+use ndarray::{Array1, Array2, ArrayD, ArrayViewD, s};
 use om_file_format_sys::{
     OmError_t, fpxdec32, fpxenc32, om_variable_get_children_count, om_variable_get_scalar,
     om_variable_get_type, om_variable_init, om_variable_write_scalar,
     om_variable_write_scalar_size,
 };
+use omfiles::io::tree_navigator::TreeNavigator;
 use omfiles::{
     backend::{
         backends::{InMemoryBackend, OmFileReaderBackend},
@@ -28,6 +29,7 @@ use std::{
     ptr, slice,
     sync::Arc,
 };
+use tempfile::NamedTempFile;
 
 mod test_utils;
 use test_utils::remove_file_if_exists;
@@ -1413,4 +1415,160 @@ fn nd_assert_eq_with_accuracy_and_nan(
             );
         }
     }
+}
+
+fn create_hierarchical_test_file() -> Result<NamedTempFile, OmFilesRsError> {
+    let temp_file = NamedTempFile::new().unwrap();
+    let file_path = temp_file.path().to_str().clone().unwrap();
+
+    let file = File::create(file_path).unwrap();
+    let mut file_writer = OmFileWriter::new(file, 8);
+
+    // child_0_0_0
+    let data_child_0_0_0 = Array1::<f32>::from_vec(vec![19.5, 20.0, 20.5]).into_dyn();
+    let mut writer = file_writer.prepare_array::<f32>(
+        vec![3u64],
+        vec![3u64],
+        CompressionType::PforDelta2dInt16,
+        1.0,
+        0.0,
+    )?;
+    writer.write_data(data_child_0_0_0.view(), None, None)?;
+    let var_child_0_0_0 = writer.finalize();
+
+    // child_0_0_1
+    let data_child_0_0_1 =
+        Array2::<f32>::from_shape_vec((2, 3), vec![20.1, 20.2, 20.3, 21.1, 21.2, 21.3])
+            .unwrap()
+            .into_dyn();
+    let mut writer = file_writer.prepare_array::<f32>(
+        vec![2u64, 3u64],
+        vec![2u64, 3u64],
+        CompressionType::PforDelta2dInt16,
+        10.0,
+        0.0,
+    )?;
+    writer.write_data(data_child_0_0_1.view(), None, None)?;
+    let var_child_0_0_1 = writer.finalize();
+
+    // child_0_1_0
+    let data_child_0_1_0 = Array1::<f32>::from_vec(vec![45.0, 50.0, 55.0]).into_dyn();
+    let mut writer = file_writer.prepare_array::<f32>(
+        vec![3u64],
+        vec![3u64],
+        CompressionType::PforDelta2dInt16,
+        1.0,
+        0.0,
+    )?;
+    writer.write_data(data_child_0_1_0.view(), None, None)?;
+    let var_child_0_1_0 = writer.finalize();
+
+    // child_0_1_1
+    let data_child_0_1_1 = Array1::<f32>::from_vec(vec![1013.25, 1012.50]).into_dyn();
+    let mut writer = file_writer.prepare_array::<f32>(
+        vec![2u64],
+        vec![2u64],
+        CompressionType::PforDelta2d,
+        100.0,
+        0.0,
+    )?;
+    writer.write_data(data_child_0_1_1.view(), None, None)?;
+    let var_child_0_1_1 = writer.finalize();
+
+    // Write leaf arrays
+    let child_0_0_0 = file_writer.write_array(var_child_0_0_0, "child_0_0_0", &[])?;
+    let child_0_0_1 = file_writer.write_array(var_child_0_0_1, "child_0_0_1", &[])?;
+    let child_0_1_0 = file_writer.write_array(var_child_0_1_0, "child_0_1_0", &[])?;
+    let child_0_1_1 = file_writer.write_array(var_child_0_1_1, "child_0_1_1", &[])?;
+
+    // Write intermediate groups
+    let child_0_0 = file_writer.write_none("child_0_0", &[child_0_0_0, child_0_0_1])?;
+    let child_0_1 = file_writer.write_none("child_0_1", &[child_0_1_0, child_0_1_1])?;
+    let child_0 = file_writer.write_none("child_0", &[child_0_0, child_0_1])?;
+
+    // Root variable
+    let data_root_var = Array1::<f32>::from_vec(vec![1.0, 2.0, 3.0, 4.0]).into_dyn();
+    let mut writer = file_writer.prepare_array::<f32>(
+        vec![4u64],
+        vec![2u64],
+        CompressionType::PforDelta2dInt16,
+        1.0,
+        0.0,
+    )?;
+    writer.write_data(data_root_var.view(), None, None)?;
+    let var_root_var = writer.finalize();
+
+    let root_variable = file_writer.write_array(var_root_var, "root", &[child_0])?;
+    file_writer.write_trailer(root_variable)?;
+
+    Ok(temp_file)
+}
+
+#[test]
+fn test_find_by_path() {
+    let temp = create_hierarchical_test_file().unwrap();
+    let temp_file_path = temp.path();
+    let temp_file = temp_file_path.to_str().clone().unwrap();
+    let reader = OmFileReader::from_file(&temp_file).unwrap();
+
+    // Test finding at different levels
+    let child_0 = reader.find_by_path("child_0");
+    assert!(child_0.is_some());
+    assert_eq!(child_0.unwrap().get_name().unwrap(), "child_0");
+
+    let child_0_0 = reader.find_by_path("child_0/child_0_0");
+    assert!(child_0_0.is_some());
+    assert_eq!(child_0_0.unwrap().get_name().unwrap(), "child_0_0");
+
+    let child_0_0_1 = reader.find_by_path("child_0/child_0_0/child_0_0_1");
+    assert!(child_0_0_1.is_some());
+    assert_eq!(child_0_0_1.unwrap().get_name().unwrap(), "child_0_0_1");
+
+    // Test non-existent path
+    let nonexistent = reader.find_by_path("child_0/child_0_2");
+    assert!(nonexistent.is_none());
+}
+
+#[test]
+fn test_get_child_by_name() {
+    let temp = create_hierarchical_test_file().unwrap();
+    let temp_file_path = temp.path();
+    let temp_file = temp_file_path.to_str().clone().unwrap();
+    let reader = OmFileReader::from_file(&temp_file).unwrap();
+
+    // Navigate step by step
+    let child_0 = reader.get_child_by_name("child_0").unwrap();
+    let child_0_1 = child_0.get_child_by_name("child_0_1").unwrap();
+    let child_0_1_0 = child_0_1.get_child_by_name("child_0_1_0").unwrap();
+
+    assert_eq!(child_0_1_0.get_name().unwrap(), "child_0_1_0");
+
+    // Test non-existent child
+    let nonexistent = child_0.get_child_by_name("child_0_9");
+    assert!(nonexistent.is_none());
+}
+
+#[test]
+fn test_navigation_with_data_reading() {
+    let temp = create_hierarchical_test_file().unwrap();
+    let temp_file_path = temp.path();
+    let temp_file = temp_file_path.to_str().clone().unwrap();
+    let reader = OmFileReader::from_file(&temp_file).unwrap();
+
+    // Navigate to leaf node and read data
+    let child_0_0_1 = reader
+        .find_by_path("child_0/child_0_0/child_0_0_1")
+        .unwrap();
+    let data = child_0_0_1.read::<f32>(&[0..2, 0..3], None, None).unwrap();
+    assert_eq!(data.shape(), &[2, 3]);
+    assert_eq!(data[[0, 0]], 20.1);
+    assert_eq!(data[[1, 2]], 21.3);
+
+    // Navigate to different leaf and read data
+    let child_0_1_1 = reader
+        .find_by_path("child_0/child_0_1/child_0_1_1")
+        .unwrap();
+    let data = child_0_1_1.read::<f32>(&[0..2], None, None).unwrap();
+    assert_eq!(data.len(), 2);
+    assert_eq!(data[0], 1013.25);
 }

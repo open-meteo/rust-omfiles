@@ -2,6 +2,7 @@ use crate::io::writer::OmOffsetSize;
 use om_file_format_sys::{OmVariable_t, om_variable_init};
 use std::ops::Deref;
 use std::os::raw::c_void;
+use std::sync::Arc;
 
 /// A wrapper around the raw C pointer OmVariable_t
 /// marked as Send + Sync.
@@ -30,9 +31,10 @@ impl Deref for OmVariablePtr {
 }
 
 /// Core struct to handle variable data and metadata
+#[derive(Clone)]
 pub struct OmVariableContainer {
     /// Holds the raw data backing the variable
-    pub data: Vec<u8>,
+    pub data: Arc<[u8]>,
     /// Offset and size information for the variable
     pub offset_size: Option<OmOffsetSize>,
     /// Opaque pointer to the variable defined by header/trailer
@@ -42,7 +44,9 @@ pub struct OmVariableContainer {
 impl OmVariableContainer {
     /// Create a new variable from raw data
     pub fn new(data: Vec<u8>, offset_size: Option<OmOffsetSize>) -> Self {
+        let data: Arc<[u8]> = data.into();
         let variable_ptr = unsafe { om_variable_init(data.as_ptr() as *const c_void) };
+
         Self {
             data,
             offset_size,
