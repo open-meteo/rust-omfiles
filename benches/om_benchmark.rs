@@ -1,4 +1,5 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use ndarray::{Array, ArrayViewD};
 use omfiles::{
     backend::{
         backends::InMemoryBackend,
@@ -11,6 +12,7 @@ use rand::Rng;
 use std::{
     borrow::BorrowMut,
     fs::{self, File},
+    hint::black_box,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -20,7 +22,7 @@ const DIM1_SIZE: u64 = 1024;
 const CHUNK0_SIZE: u64 = 20;
 const CHUNK1_SIZE: u64 = 20;
 
-fn write_om_file(file: &str, data: &[f32]) {
+fn write_om_file(file: &str, data: ArrayViewD<f32>) {
     let file_handle = File::create(file).unwrap();
     let mut file_writer = OmFileWriter::new(&file_handle, 8);
 
@@ -34,7 +36,7 @@ fn write_om_file(file: &str, data: &[f32]) {
         )
         .unwrap();
 
-    writer.write_data_flat(data, None, None, None).unwrap();
+    writer.write_data(data, None, None).unwrap();
     let variable_meta = writer.finalize();
     let variable = file_writer.write_array(variable_meta, "data", &[]).unwrap();
     file_writer.write_trailer(variable).unwrap();
@@ -44,7 +46,10 @@ pub fn benchmark_in_memory(c: &mut Criterion) {
     let mut group = c.benchmark_group("In-memory operations");
     group.sample_size(10);
 
-    let data: Vec<f32> = (0..DIM0_SIZE * DIM1_SIZE).map(|x| x as f32).collect();
+    let data = Array::from_shape_fn((DIM0_SIZE as usize, DIM1_SIZE as usize), |(i, j)| {
+        (i * DIM1_SIZE as usize + j) as f32
+    })
+    .into_dyn();
 
     group.bench_function("write_in_memory", |b| {
         b.iter_custom(|iters| {
@@ -63,7 +68,7 @@ pub fn benchmark_in_memory(c: &mut Criterion) {
                     )
                     .unwrap();
 
-                black_box(writer.write_data_flat(&data, None, None, None).unwrap());
+                black_box(writer.write_data(data.view(), None, None).unwrap());
                 let variable_meta = writer.finalize();
                 let variable = file_writer.write_array(variable_meta, "data", &[]).unwrap();
                 black_box(file_writer.write_trailer(variable).unwrap());
@@ -81,7 +86,11 @@ pub fn benchmark_write(c: &mut Criterion) {
     group.sample_size(10);
 
     let file = "benchmark.om";
-    let data: Vec<f32> = (0..DIM0_SIZE * DIM1_SIZE).map(|x| x as f32).collect();
+
+    let data = Array::from_shape_fn((DIM0_SIZE as usize, DIM1_SIZE as usize), |(i, j)| {
+        (i * DIM1_SIZE as usize + j) as f32
+    })
+    .into_dyn();
 
     group.bench_function("write_om_file", move |b| {
         b.iter_custom(|iters| {
@@ -89,7 +98,7 @@ pub fn benchmark_write(c: &mut Criterion) {
             for _i in 0..iters {
                 remove_file_if_exists(file);
                 timer.start();
-                black_box(write_om_file(file, &data));
+                black_box(write_om_file(file, data.view()));
                 timer.stop();
             }
             timer.elapsed()
@@ -111,8 +120,8 @@ pub fn benchmark_read(c: &mut Criterion) {
 
     group.bench_function("read_om_file", move |b| {
         b.iter(|| {
-            let random_x: u64 = rand::thread_rng().gen_range(0..DIM0_SIZE - dim0_read_size);
-            let random_y: u64 = rand::thread_rng().gen_range(0..DIM1_SIZE);
+            let random_x: u64 = rand::rng().random_range(0..DIM0_SIZE - dim0_read_size);
+            let random_y: u64 = rand::rng().random_range(0..DIM1_SIZE);
             let values = reader
                 .read::<f32>(
                     &[random_x..random_x + dim0_read_size, random_y..random_y + 1],

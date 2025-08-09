@@ -36,8 +36,8 @@ impl<Backend: OmFileWriterBackend> OmBufferedWriter<Backend> {
         self.write_position = 0;
     }
 
-    /// Add empty space if required to align to 64 bits
-    pub fn align_to_64_bytes(&mut self) -> Result<(), OmFilesRsError> {
+    /// Add empty space if required to align to 8 bytes
+    pub fn align_to_8_bytes(&mut self) -> Result<(), OmFilesRsError> {
         let bytes_to_pad = 8 - self.total_bytes_written % 8;
         if bytes_to_pad == 8 {
             return Ok(());
