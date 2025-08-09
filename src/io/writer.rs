@@ -345,7 +345,7 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
             .reallocate(self.compressed_chunk_buffer_size as usize * 4)?;
 
         let number_of_chunks_in_array =
-            unsafe { om_encoder_count_chunks_in_array(&mut self.encoder, array_count.as_ptr()) };
+            unsafe { om_encoder_count_chunks_in_array(&self.encoder, array_count.as_ptr()) };
 
         if self.chunk_index == 0 {
             self.look_up_table[self.chunk_index as usize] = self.buffer.total_bytes_written as u64;
@@ -361,7 +361,7 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
 
             let bytes_written = unsafe {
                 om_encoder_compress_chunk(
-                    &mut self.encoder,
+                    &self.encoder,
                     array.as_ptr() as *const c_void,
                     array_dimensions.as_ptr(),
                     array_offset.as_ptr(),
@@ -407,7 +407,8 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
         compressed_lut_size
     }
 
-    /// Finalize the array and return the finalized struct.
+    /// Writes the LUT to the file and returns a structure with all the
+    /// relevant information about the array.
     pub fn finalize(mut self) -> OmFileWriterArrayFinalized {
         let lut_offset = self.buffer.total_bytes_written as u64;
         let lut_size = self.write_lut();
