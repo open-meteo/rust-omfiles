@@ -39,7 +39,7 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         }
     }
 
-    pub fn write_header_if_required(&mut self) -> Result<(), OmFilesRsError> {
+    fn write_header_if_required(&mut self) -> Result<(), OmFilesRsError> {
         if self.buffer.total_bytes_written > 0 {
             return Ok(());
         }
@@ -66,8 +66,8 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         let type_scalar = T::DATA_TYPE_SCALAR.to_c();
         let children_offsets: Vec<u64> = children.iter().map(|c| c.offset).collect();
         let children_sizes: Vec<u64> = children.iter().map(|c| c.size).collect();
-        // Align to 64 bytes before writing
-        self.buffer.align_to_64_bytes()?;
+        // Align to 8 bytes before writing
+        self.buffer.align_to_8_bytes()?;
         let offset = self.buffer.total_bytes_written as u64;
 
         let size = value.with_raw_bytes(|bytes| -> Result<usize, OmFilesRsError> {
@@ -113,14 +113,14 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         self.write_scalar(OmNone::default(), name, children)
     }
 
-    pub fn prepare_array<T: OmFileArrayDataType>(
-        &mut self,
+    pub fn prepare_array<'a, T: OmFileArrayDataType>(
+        &'a mut self,
         dimensions: Vec<u64>,
         chunk_dimensions: Vec<u64>,
         compression: CompressionType,
         scale_factor: f32,
         add_offset: f32,
-    ) -> Result<OmFileWriterArray<T, Backend>, OmFilesRsError> {
+    ) -> Result<OmFileWriterArray<'a, T, Backend>, OmFilesRsError> {
         let _ = &self.write_header_if_required()?;
 
         let array_writer = OmFileWriterArray::new(
@@ -154,7 +154,7 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
                 array.dimensions.len() as u64,
             )
         };
-        self.buffer.align_to_64_bytes()?;
+        self.buffer.align_to_8_bytes()?;
 
         let offset = self.buffer.total_bytes_written as u64;
 
@@ -188,7 +188,7 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
 
     pub fn write_trailer(&mut self, root_variable: OmOffsetSize) -> Result<(), OmFilesRsError> {
         self.write_header_if_required()?;
-        self.buffer.align_to_64_bytes()?;
+        self.buffer.align_to_8_bytes()?;
 
         let size = unsafe { om_trailer_size() };
         self.buffer.reallocate(size)?;
@@ -303,7 +303,7 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
     }
 
     /// Compresses data and writes it to file.
-    pub fn write_data_flat(
+    fn write_data_flat(
         &mut self,
         array: &[OmType],
         array_dimensions: Option<&[u64]>,

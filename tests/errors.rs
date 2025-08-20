@@ -60,12 +60,7 @@ fn test_offset_and_count_exceed_dimension() {
         .unwrap();
 
     let array = ArrayD::from_elem(vec![10, 10], 1);
-    let result = array_writer.write_data_flat(
-        &array.as_slice().unwrap(),
-        Some(&[10, 10]),
-        Some(&[5, 5]),
-        Some(&[6, 6]),
-    );
+    let result = array_writer.write_data(array.view(), Some(&[5, 5]), Some(&[6, 6]));
 
     assert_eq!(
         error_string(result),

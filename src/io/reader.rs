@@ -143,7 +143,7 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
     /// Retrieve the complete chunk lookup table (LUT) as a vector of i64 offsets
     pub fn get_complete_lut(&self) -> Result<Vec<u64>, OmFilesRsError> {
         use om_file_format_sys::{
-            om_decoder_get_partial_lut, om_decoder_next_index_read, OmError_t,
+            OmError_t, om_decoder_get_partial_lut, om_decoder_next_index_read,
         };
 
         // Get necessary info for decoder
