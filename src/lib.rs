@@ -28,3 +28,5 @@ pub mod backend {
 pub mod errors;
 
 mod utils;
+
+pub use om_file_format_sys as _om_file_format_sys;
