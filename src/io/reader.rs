@@ -10,7 +10,8 @@ use crate::io::writer::OmOffsetSize;
 use ndarray::ArrayD;
 use num_traits::Zero;
 use om_file_format_sys::{
-    OmHeaderType_t, om_header_size, om_header_type, om_trailer_size, om_variable_get_children,
+    OmError_t, OmHeaderType_t, om_decoder_get_partial_lut, om_decoder_next_index_read,
+    om_header_size, om_header_type, om_trailer_size, om_variable_get_children,
 };
 use std::collections::HashMap;
 use std::fs::File;
@@ -142,10 +143,6 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
 
     /// Retrieve the complete chunk lookup table (LUT) as a vector of i64 offsets
     pub fn get_complete_lut(&self) -> Result<Vec<u64>, OmFilesRsError> {
-        use om_file_format_sys::{
-            OmError_t, om_decoder_get_partial_lut, om_decoder_next_index_read,
-        };
-
         // Get necessary info for decoder
         let dimensions = self.get_dimensions();
         let n_dims = dimensions.len();
@@ -163,9 +160,9 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
             self.variable.variable,
             n_dims as u64,
             read_offset,
-            read_count,
+            read_count.clone(),
             &vec![0; n_dims], // No cube offset
-            &vec![0; n_dims], // No cube dimensions
+            &read_count,      // Cube dimensions equal read dimensions
             io_size_merge,
             io_size_max,
         )?;
