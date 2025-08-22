@@ -30,6 +30,7 @@ async-lock = "3.4.1"
 async-executor = "1.13.2"
 
 [dev-dependencies]
+tempfile = "3"
 criterion = "0.7"
 rand = "0.9"
 smol-macros = "0.1.1"

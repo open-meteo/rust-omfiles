@@ -10,6 +10,7 @@ pub mod io {
     pub(crate) mod variable;
     #[macro_use]
     pub(crate) mod variable_impl;
+    pub mod tree_navigator;
     pub mod wrapped_decoder;
     pub mod writer;
 }
