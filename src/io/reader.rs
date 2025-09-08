@@ -3,7 +3,10 @@ use crate::core::data_types::OmFileArrayDataType;
 use crate::errors::OmFilesRsError;
 use crate::io::reader_utils::process_trailer;
 use crate::io::variable::OmVariableContainer;
-use crate::io::variable_impl::implement_variable_methods;
+use crate::io::variable_impl::{
+    implement_array_variable_methods, implement_common_variable_methods,
+    implement_scalar_variable_methods,
+};
 use crate::io::writer::OmOffsetSize;
 use crate::traits::OmFileReaderBackend;
 use ndarray::ArrayD;
@@ -25,7 +28,9 @@ pub struct OmFileReader<Backend> {
 }
 
 // implement utility methods for OmFileReader
-implement_variable_methods!(OmFileReader<Backend>);
+implement_common_variable_methods!(OmFileReader<Backend>);
+implement_scalar_variable_methods!(OmFileReader<Backend>);
+implement_array_variable_methods!(OmFileReader<Backend>);
 
 impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
     pub fn new(backend: Arc<Backend>) -> Result<Self, OmFilesRsError> {

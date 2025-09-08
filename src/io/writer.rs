@@ -223,7 +223,6 @@ pub struct OmFileWriterArray<'a, OmType: OmFileArrayDataType, Backend: OmFileWri
 impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
     OmFileWriterArray<'a, OmType, Backend>
 {
-    /// `lut_chunk_element_count` should be 256 for production files.
     pub fn new(
         dimensions: Vec<u64>,
         chunk_dimensions: Vec<u64>,

@@ -9,7 +9,10 @@ use crate::core::data_types::OmFileArrayDataType;
 use crate::errors::OmFilesRsError;
 use crate::io::reader_utils::process_trailer;
 use crate::io::variable::OmVariableContainer;
-use crate::io::variable_impl::implement_variable_methods;
+use crate::io::variable_impl::{
+    implement_array_variable_methods, implement_common_variable_methods,
+    implement_scalar_variable_methods,
+};
 use crate::traits::OmFileReaderBackendAsync;
 use async_executor::{Executor, Task};
 use async_lock::Semaphore;
@@ -51,7 +54,9 @@ pub struct OmFileReaderAsync<Backend> {
 }
 
 // implement utility methods for OmFileReaderAsync
-implement_variable_methods!(OmFileReaderAsync<Backend>);
+implement_common_variable_methods!(OmFileReaderAsync<Backend>);
+implement_scalar_variable_methods!(OmFileReaderAsync<Backend>);
+implement_array_variable_methods!(OmFileReaderAsync<Backend>);
 
 impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsync<Backend> {
     /// Creates a new asynchronous reader for an Open-Meteo file.

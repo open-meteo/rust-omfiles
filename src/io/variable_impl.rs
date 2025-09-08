@@ -1,5 +1,4 @@
-/// Macro that implements all variable reader methods on the provided type
-macro_rules! implement_variable_methods {
+macro_rules! implement_common_variable_methods {
     ($type:ident < $generic:ident >) => {
         impl<$generic> $type<$generic> {
             /// Returns the data type of the variable
@@ -12,6 +11,69 @@ macro_rules! implement_variable_methods {
                 }
             }
 
+            /// Returns the name of the variable, if available
+            pub fn get_name(&self) -> Option<String> {
+                unsafe {
+                    let name = om_file_format_sys::om_variable_get_name(*self.variable.variable);
+                    if name.size == 0 {
+                        return None;
+                    }
+                    let bytes =
+                        std::slice::from_raw_parts(name.value as *const u8, name.size as usize);
+                    String::from_utf8(bytes.to_vec()).ok()
+                }
+            }
+
+            /// Returns the number of children of the variable
+            pub fn number_of_children(&self) -> u32 {
+                unsafe {
+                    om_file_format_sys::om_variable_get_children_count(*self.variable.variable)
+                }
+            }
+        }
+    };
+}
+
+macro_rules! implement_scalar_variable_methods {
+    ($type:ident < $generic:ident >) => {
+        impl<$generic> $type<$generic> {
+            /// Read a scalar value of the specified type
+            pub fn read_scalar<T: crate::core::data_types::OmFileScalarDataType>(
+                &self,
+            ) -> Option<T> {
+                if T::DATA_TYPE_SCALAR != self.data_type() {
+                    return None;
+                }
+
+                let mut ptr: *mut std::os::raw::c_void = std::ptr::null_mut();
+                let mut size: u64 = 0;
+
+                let error = unsafe {
+                    om_file_format_sys::om_variable_get_scalar(
+                        *self.variable.variable,
+                        &mut ptr,
+                        &mut size,
+                    )
+                };
+
+                if error != om_file_format_sys::OmError_t::ERROR_OK || ptr.is_null() {
+                    return None;
+                }
+
+                // Safety: ptr points to a valid memory region of 'size' bytes
+                // that contains data of the expected type
+                let bytes = unsafe { std::slice::from_raw_parts(ptr as *const u8, size as usize) };
+
+                Some(T::from_raw_bytes(bytes))
+            }
+        }
+    };
+}
+
+/// Macro that implements all variable reader methods on the provided type
+macro_rules! implement_array_variable_methods {
+    ($type:ident < $generic:ident >) => {
+        impl<$generic> $type<$generic> {
             /// Returns the compression type of the variable
             pub fn compression(&self) -> $crate::core::compression::CompressionType {
                 unsafe {
@@ -49,56 +111,6 @@ macro_rules! implement_variable_methods {
                         om_file_format_sys::om_variable_get_chunks(*self.variable.variable);
                     std::slice::from_raw_parts(chunks.values, chunks.count as usize)
                 }
-            }
-
-            /// Returns the name of the variable, if available
-            pub fn get_name(&self) -> Option<String> {
-                unsafe {
-                    let name = om_file_format_sys::om_variable_get_name(*self.variable.variable);
-                    if name.size == 0 {
-                        return None;
-                    }
-                    let bytes =
-                        std::slice::from_raw_parts(name.value as *const u8, name.size as usize);
-                    String::from_utf8(bytes.to_vec()).ok()
-                }
-            }
-
-            /// Returns the number of children of the variable
-            pub fn number_of_children(&self) -> u32 {
-                unsafe {
-                    om_file_format_sys::om_variable_get_children_count(*self.variable.variable)
-                }
-            }
-
-            /// Read a scalar value of the specified type
-            pub fn read_scalar<T: crate::core::data_types::OmFileScalarDataType>(
-                &self,
-            ) -> Option<T> {
-                if T::DATA_TYPE_SCALAR != self.data_type() {
-                    return None;
-                }
-
-                let mut ptr: *mut std::os::raw::c_void = std::ptr::null_mut();
-                let mut size: u64 = 0;
-
-                let error = unsafe {
-                    om_file_format_sys::om_variable_get_scalar(
-                        *self.variable.variable,
-                        &mut ptr,
-                        &mut size,
-                    )
-                };
-
-                if error != om_file_format_sys::OmError_t::ERROR_OK || ptr.is_null() {
-                    return None;
-                }
-
-                // Safety: ptr points to a valid memory region of 'size' bytes
-                // that contains data of the expected type
-                let bytes = unsafe { std::slice::from_raw_parts(ptr as *const u8, size as usize) };
-
-                Some(T::from_raw_bytes(bytes))
             }
 
             /// Prepare common parameters for reading data
@@ -151,4 +163,6 @@ macro_rules! implement_variable_methods {
     };
 }
 
-pub(crate) use implement_variable_methods;
+pub(crate) use implement_array_variable_methods;
+pub(crate) use implement_common_variable_methods;
+pub(crate) use implement_scalar_variable_methods;
