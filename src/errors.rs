@@ -49,4 +49,6 @@ pub enum OmFilesRsError {
     ArrayNotContiguous,
     #[error("Task Error: {0}")]
     TaskError(String),
+    #[error("Generic error: {0}")]
+    GenericError(String),
 }
