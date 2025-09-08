@@ -18,7 +18,7 @@ pub enum CompressionType {
 }
 
 impl CompressionType {
-    pub fn to_c(&self) -> OmCompression_t {
+    pub(crate) fn to_c(&self) -> OmCompression_t {
         unsafe { std::mem::transmute(*self as u32) }
     }
 }

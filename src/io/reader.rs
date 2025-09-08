@@ -1,11 +1,11 @@
-use crate::backend::backends::OmFileReaderBackend;
-use crate::backend::mmapfile::{MmapFile, Mode};
+use crate::backends::mmapfile::{MmapFile, Mode};
 use crate::core::data_types::OmFileArrayDataType;
 use crate::errors::OmFilesRsError;
 use crate::io::reader_utils::process_trailer;
 use crate::io::variable::OmVariableContainer;
 use crate::io::variable_impl::implement_variable_methods;
 use crate::io::writer::OmOffsetSize;
+use crate::traits::OmFileReaderBackend;
 use ndarray::ArrayD;
 use num_traits::Zero;
 use om_file_format_sys::{

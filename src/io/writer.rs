@@ -1,9 +1,9 @@
-use crate::backend::backends::OmFileWriterBackend;
 use crate::core::c_defaults::{c_error_string, create_uninit_encoder};
 use crate::core::compression::CompressionType;
 use crate::core::data_types::{DataType, OmFileArrayDataType, OmFileScalarDataType, OmNone};
 use crate::errors::OmFilesRsError;
 use crate::io::buffered_writer::OmBufferedWriter;
+use crate::traits::OmFileWriterBackend;
 use ndarray::ArrayViewD;
 use om_file_format_sys::{
     OmEncoder_t, OmError_t, om_encoder_chunk_buffer_size, om_encoder_compress_chunk,

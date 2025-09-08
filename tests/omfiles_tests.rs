@@ -6,8 +6,8 @@ use om_file_format_sys::{
     om_variable_write_scalar_size,
 };
 use omfiles::{
-    backend::{
-        backends::{InMemoryBackend, OmFileReaderBackend},
+    backends::{
+        memory::InMemoryBackend,
         mmapfile::{MmapFile, Mode},
     },
     core::{compression::CompressionType, data_types::DataType},
@@ -17,6 +17,7 @@ use omfiles::{
         reader_async::OmFileReaderAsync,
         writer::{OmFileWriter, OmOffsetSize},
     },
+    traits::OmFileReaderBackend,
 };
 use smol_macros::test;
 use std::{

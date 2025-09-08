@@ -1,6 +1,6 @@
 use ndarray::ArrayD;
-use omfiles::backend::backends::InMemoryBackend;
-use omfiles::backend::mmapfile::MmapFile;
+use omfiles::backends::memory::InMemoryBackend;
+use omfiles::backends::mmapfile::MmapFile;
 use omfiles::core::compression::CompressionType;
 use omfiles::errors::OmFilesRsError;
 use omfiles::io::reader::OmFileReader;

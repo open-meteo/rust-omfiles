@@ -1,7 +1,14 @@
+//! Reader backend implementation based on memory-mapped files.
+
 #[cfg(unix)]
 use memmap2::{Advice, UncheckedAdvice};
 use memmap2::{Mmap, MmapMut, MmapOptions};
 use std::fs::File;
+
+use crate::{
+    errors::OmFilesRsError,
+    traits::{OmFileReaderBackend, OmFileReaderBackendAsync},
+};
 
 /// Represents a memory-mapped file with support for read-only and read-write modes
 pub struct MmapFile {
@@ -52,15 +59,6 @@ pub enum Mode {
     ReadWrite,
 }
 
-impl Mode {
-    fn is_read_only(&self) -> bool {
-        match self {
-            Mode::ReadOnly => true,
-            Mode::ReadWrite => false,
-        }
-    }
-}
-
 pub enum MAdvice {
     WillNeed,
     DontNeed,
@@ -86,16 +84,15 @@ impl MAdvice {
 impl MmapFile {
     /// Mmap the entire filehandle
     pub fn new(file: File, mode: Mode) -> Result<Self, std::io::Error> {
-        let data = if mode.is_read_only() {
-            MmapType::ReadOnly(unsafe { MmapOptions::new().map(&file)? })
-        } else {
-            MmapType::ReadWrite(unsafe { MmapOptions::new().map_mut(&file)? })
+        let data = match mode {
+            Mode::ReadOnly => MmapType::ReadOnly(unsafe { MmapOptions::new().map(&file)? }),
+            Mode::ReadWrite => MmapType::ReadWrite(unsafe { MmapOptions::new().map_mut(&file)? }),
         };
         Ok(MmapFile { data, file })
     }
 
     /// Check if the file was deleted on the file system. Linux keeps the file alive as long as some processes have it open.
-    pub fn was_deleted(&self) -> bool {
+    pub(crate) fn was_deleted(&self) -> bool {
         // Try to stat the file to see if it still exists
         match self.file.metadata() {
             Ok(_) => false,
@@ -104,8 +101,8 @@ impl MmapFile {
         }
     }
 
-    /// Tell the OS to prefault the required memory pages. Subsequent calls to read data should be faster
-    pub fn prefetch_data_advice(&self, offset: usize, count: usize, advice: MAdvice) {
+    /// Tell the OS to prefetch the required memory pages. Subsequent calls to read data should be faster
+    pub(crate) fn prefetch_data_advice(&self, offset: usize, count: usize, advice: MAdvice) {
         let page_size = 4096;
         let page_start = offset / page_size * page_size;
         let page_end = (offset + count + page_size - 1) / page_size * page_size;
@@ -127,5 +124,36 @@ impl MmapFile {
 impl Drop for MmapFile {
     fn drop(&mut self) {
         // The Mmap type will automatically unmap the memory when it is dropped
+    }
+}
+
+impl OmFileReaderBackend for MmapFile {
+    type Bytes<'a> = &'a [u8];
+
+    fn count(&self) -> usize {
+        self.data.len()
+    }
+
+    fn prefetch_data(&self, offset: usize, count: usize) {
+        self.prefetch_data_advice(offset, count, MAdvice::WillNeed);
+    }
+
+    fn get_bytes(&self, offset: u64, count: u64) -> Result<Self::Bytes<'_>, OmFilesRsError> {
+        let index_range = (offset as usize)..(offset + count) as usize;
+        match self.data {
+            MmapType::ReadOnly(ref mmap) => Ok(&mmap[index_range]),
+            MmapType::ReadWrite(ref mmap_mut) => Ok(&mmap_mut[index_range]),
+        }
+    }
+}
+
+impl OmFileReaderBackendAsync for MmapFile {
+    fn count_async(&self) -> usize {
+        self.data.len()
+    }
+
+    async fn get_bytes_async(&self, offset: u64, count: u64) -> Result<Vec<u8>, OmFilesRsError> {
+        let data = self.get_bytes(offset, count);
+        Ok(data?.to_vec())
     }
 }

@@ -2,6 +2,8 @@
 //!
 //! This library provides functionality for reading and writing OM file format.
 //!
+
+pub mod traits;
 pub mod io {
     pub(crate) mod buffered_writer;
     pub mod reader;
@@ -20,8 +22,9 @@ pub mod core {
     pub mod data_types;
 }
 
-pub mod backend {
-    pub mod backends;
+pub mod backends {
+    pub mod file;
+    pub mod memory;
     pub mod mmapfile;
 }
 

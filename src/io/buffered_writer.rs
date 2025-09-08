@@ -1,5 +1,5 @@
-use crate::backend::backends::OmFileWriterBackend;
 use crate::errors::OmFilesRsError;
+use crate::traits::OmFileWriterBackend;
 use crate::utils::divide_rounded_up;
 
 /// All data is written to a buffer before flushed to a backend
