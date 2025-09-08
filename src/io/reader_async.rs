@@ -8,9 +8,9 @@
 use crate::backend::backends::OmFileReaderBackendAsync;
 use crate::core::data_types::OmFileArrayDataType;
 use crate::errors::OmFilesRsError;
-use crate::implement_variable_methods;
 use crate::io::reader_utils::process_trailer;
 use crate::io::variable::OmVariableContainer;
+use crate::io::variable_impl::implement_variable_methods;
 use async_executor::{Executor, Task};
 use async_lock::Semaphore;
 use ndarray::ArrayD;

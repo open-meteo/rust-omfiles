@@ -1,6 +1,6 @@
-//! omfiles-rs: A Rust library for working with Om files
+//! omfiles: A Rust library for working with Open-Meteo OM files
 //!
-//! This library provides functionality for reading and writing Om file format.
+//! This library provides functionality for reading and writing OM file format.
 //!
 pub mod io {
     pub(crate) mod buffered_writer;
@@ -10,12 +10,12 @@ pub mod io {
     pub(crate) mod variable;
     #[macro_use]
     pub(crate) mod variable_impl;
-    pub mod wrapped_decoder;
+    pub(crate) mod wrapped_decoder;
     pub mod writer;
 }
 
 pub mod core {
-    pub mod c_defaults;
+    pub(crate) mod c_defaults;
     pub mod compression;
     pub mod data_types;
 }

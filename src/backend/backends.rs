@@ -37,7 +37,7 @@ pub trait OmFileReaderBackend: Send + Sync {
 
     /// Returns a container of bytes from the backend.
     /// This might be a borrowed slice for zero-copy backends (like mmap)
-    /// or an owned Vec<u8> for others (like file IO).
+    /// or an owned `Vec<u8>` for others (like file IO).
     fn get_bytes(&self, _offset: u64, _count: u64) -> Result<Self::Bytes<'_>, OmFilesRsError>;
 
     fn decode<OmType: OmFileArrayDataType>(

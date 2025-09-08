@@ -1,5 +1,4 @@
 /// Macro that implements all variable reader methods on the provided type
-#[macro_export]
 macro_rules! implement_variable_methods {
     ($type:ident < $generic:ident >) => {
         impl<$generic> $type<$generic> {
@@ -151,3 +150,5 @@ macro_rules! implement_variable_methods {
         }
     };
 }
+
+pub(crate) use implement_variable_methods;
