@@ -31,6 +31,7 @@ pub trait OmFileReaderBackend: Send + Sync {
 
     /// Length in bytes
     fn count(&self) -> usize;
+
     /// Prefetch data for future access. E.g. madvice on memory mapped files
     fn prefetch_data(&self, offset: usize, count: usize);
 
