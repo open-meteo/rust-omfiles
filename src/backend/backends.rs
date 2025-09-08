@@ -7,10 +7,10 @@ use om_file_format_sys::{
     OmDecoder_t, OmError_t, om_decoder_decode_chunks, om_decoder_next_data_read,
     om_decoder_next_index_read,
 };
-use std::borrow::Cow;
 use std::fs::File;
 use std::future::Future;
 use std::io::Write;
+use std::ops::Deref;
 use std::os::raw::c_void;
 
 pub trait OmFileWriterBackend {
@@ -22,59 +22,23 @@ pub trait OmFileWriterBackend {
 /// Provides methods for reading bytes either by reference or as owned data,
 /// as well as functions for prefetching and pre-reading data.
 pub trait OmFileReaderBackend: Send + Sync {
+    /// The type of the byte container returned by `get_bytes`.
+    /// This can be a borrowed slice (`&'a [u8]`) or an owned container (`Vec<u8>`).
+    /// The `Deref` bound allows us to treat it like a slice `&[u8]` easily.
+    type Bytes<'a>: Deref<Target = [u8]> + Send + Sync
+    where
+        Self: 'a;
+
     /// Length in bytes
     fn count(&self) -> usize;
-    fn needs_prefetch(&self) -> bool;
+
+    /// Prefetch data for future access. E.g. madvice on memory mapped files
     fn prefetch_data(&self, offset: usize, count: usize);
-    fn pre_read(&self, offset: usize, count: usize) -> Result<(), OmFilesRsError>;
 
-    /// Returns a reference to a slice of bytes from the backend, starting at `offset` and reading `count` bytes.
-    /// At least one of `get_bytes` or `get_bytes_owned` must be implemented.
-    fn get_bytes(&self, _offset: u64, _count: u64) -> Result<&[u8], OmFilesRsError> {
-        Err(OmFilesRsError::NotImplementedError(
-            "You need to implement either get_bytes or get_bytes_owned!".to_string(),
-        ))
-    }
-
-    /// Returns an owned Vec<u8> containing bytes from the backend, starting at `offset` and reading `count` bytes.
-    /// At least one of `get_bytes` or `get_bytes_owned` must be implemented.
-    fn get_bytes_owned(&self, _offset: u64, _count: u64) -> Result<Vec<u8>, OmFilesRsError> {
-        Err(OmFilesRsError::NotImplementedError(
-            "You need to implement either get_bytes or get_bytes_owned!".to_string(),
-        ))
-    }
-
-    /// Returns a reference to a slice of bytes from the backend, starting at `offset` and reading `count` bytes.
-    /// At least one of `get_bytes` or `get_bytes_owned` must be implemented.
-    ///
-    /// This method is a fallback implementation that uses `get_bytes_owned` if `get_bytes` is not implemented.
-    /// It is using Cow semantics to avoid unnecessary cloning.
-    fn get_bytes_with_fallback<'a>(
-        &'a self,
-        offset: u64,
-        count: u64,
-    ) -> Result<Cow<'a, [u8]>, OmFilesRsError> {
-        match self.get_bytes(offset, count) {
-            Ok(bytes) => Ok(Cow::Borrowed(bytes)),
-            Err(e) => Ok(Cow::Owned(self.forward_unimplemented_error(e, || {
-                self.get_bytes_owned(offset, count)
-            })?)),
-        }
-    }
-
-    fn forward_unimplemented_error<'a, F, T>(
-        &'a self,
-        e: OmFilesRsError,
-        fallback_fn: F,
-    ) -> Result<T, OmFilesRsError>
-    where
-        F: FnOnce() -> Result<T, OmFilesRsError>,
-    {
-        match e {
-            OmFilesRsError::NotImplementedError(_) => fallback_fn(),
-            _ => Err(e),
-        }
-    }
+    /// Returns a container of bytes from the backend.
+    /// This might be a borrowed slice for zero-copy backends (like mmap)
+    /// or an owned Vec<u8> for others (like file IO).
+    fn get_bytes(&self, _offset: u64, _count: u64) -> Result<Self::Bytes<'_>, OmFilesRsError>;
 
     fn decode<OmType: OmFileArrayDataType>(
         &self,
@@ -91,8 +55,7 @@ pub trait OmFileReaderBackend: Send + Sync {
         unsafe {
             // Loop over index blocks and read index data
             while om_decoder_next_index_read(decoder, &mut index_read) {
-                let index_data =
-                    self.get_bytes_with_fallback(index_read.offset, index_read.count)?;
+                let index_data = self.get_bytes(index_read.offset, index_read.count)?;
 
                 let mut data_read = new_data_read(&index_read);
 
@@ -106,8 +69,7 @@ pub trait OmFileReaderBackend: Send + Sync {
                     index_read.count,
                     &mut error,
                 ) {
-                    let data_data =
-                        self.get_bytes_with_fallback(data_read.offset, data_read.count)?;
+                    let data_data = self.get_bytes(data_read.offset, data_read.count)?;
 
                     if !om_decoder_decode_chunks(
                         decoder,
@@ -175,24 +137,17 @@ impl OmFileWriterBackend for File {
 }
 
 impl OmFileReaderBackend for MmapFile {
+    type Bytes<'a> = &'a [u8];
+
     fn count(&self) -> usize {
         self.data.len()
-    }
-
-    fn needs_prefetch(&self) -> bool {
-        true
     }
 
     fn prefetch_data(&self, offset: usize, count: usize) {
         self.prefetch_data_advice(offset, count, MAdvice::WillNeed);
     }
 
-    fn pre_read(&self, _offset: usize, _count: usize) -> Result<(), OmFilesRsError> {
-        // No-op for mmaped file
-        Ok(())
-    }
-
-    fn get_bytes(&self, offset: u64, count: u64) -> Result<&[u8], OmFilesRsError> {
+    fn get_bytes(&self, offset: u64, count: u64) -> Result<Self::Bytes<'_>, OmFilesRsError> {
         let index_range = (offset as usize)..(offset + count) as usize;
         match self.data {
             MmapType::ReadOnly(ref mmap) => Ok(&mmap[index_range]),
@@ -236,24 +191,17 @@ impl OmFileWriterBackend for &mut InMemoryBackend {
 }
 
 impl OmFileReaderBackend for InMemoryBackend {
+    type Bytes<'a> = &'a [u8];
+
     fn count(&self) -> usize {
         self.data.len()
-    }
-
-    fn needs_prefetch(&self) -> bool {
-        false
     }
 
     fn prefetch_data(&self, _offset: usize, _count: usize) {
         // No-op for in-memory backend
     }
 
-    fn pre_read(&self, _offset: usize, _count: usize) -> Result<(), OmFilesRsError> {
-        // No-op for in-memory backend
-        Ok(())
-    }
-
-    fn get_bytes(&self, offset: u64, count: u64) -> Result<&[u8], OmFilesRsError> {
+    fn get_bytes(&self, offset: u64, count: u64) -> Result<Self::Bytes<'_>, OmFilesRsError> {
         let index_range = (offset as usize)..(offset + count) as usize;
         Ok(&self.data[index_range])
     }

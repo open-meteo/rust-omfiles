@@ -29,39 +29,45 @@ implement_variable_methods!(OmFileReader<Backend>);
 
 impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
     pub fn new(backend: Arc<Backend>) -> Result<Self, OmFilesRsError> {
+        // Read v3 files first, if this fails try legacy format
+        let file_size = backend.count();
+        let trailer_size = unsafe { om_trailer_size() };
+
+        if file_size >= trailer_size {
+            let trailer_data =
+                backend.get_bytes((file_size - trailer_size) as u64, trailer_size as u64)?;
+            match unsafe { process_trailer(&trailer_data) } {
+                Ok(offset_size) => {
+                    let variable_data = backend
+                        .get_bytes(offset_size.offset, offset_size.size)?
+                        .to_vec();
+
+                    return Ok(Self {
+                        backend: backend.clone(),
+                        variable: OmVariableContainer::new(variable_data, Some(offset_size)),
+                    });
+                }
+                Err(OmFilesRsError::NotAnOmFile) => {
+                    // fall through to v2 format
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        // Fallback: Try v2 (legacy) format
         let header_size = unsafe { om_header_size() };
-        if backend.count() < header_size {
+        if file_size < header_size {
             return Err(OmFilesRsError::FileTooSmall);
         }
-        let header_data = backend.get_bytes_with_fallback(0, header_size as u64)?;
+        let header_data = backend.get_bytes(0, header_size as u64)?;
         let header_type = unsafe { om_header_type(header_data.as_ptr() as *const c_void) };
-
-        let (variable_data, offset_size) = {
-            match header_type {
-                OmHeaderType_t::OM_HEADER_LEGACY => (header_data.into_owned(), None),
-                OmHeaderType_t::OM_HEADER_READ_TRAILER => {
-                    let file_size = backend.count();
-                    let trailer_size = unsafe { om_trailer_size() };
-                    let trailer_data = backend.get_bytes_with_fallback(
-                        (file_size - trailer_size) as u64,
-                        trailer_size as u64,
-                    )?;
-
-                    let offset_size = unsafe { process_trailer(&trailer_data) }?;
-                    let variable_data = backend
-                        .get_bytes_with_fallback(offset_size.offset, offset_size.size)?
-                        .into_owned();
-                    (variable_data, Some(offset_size))
-                }
-                OmHeaderType_t::OM_HEADER_INVALID => {
-                    return Err(OmFilesRsError::NotAnOmFile);
-                }
-            }
-        };
+        if header_type != OmHeaderType_t::OM_HEADER_LEGACY {
+            return Err(OmFilesRsError::NotAnOmFile);
+        }
 
         Ok(Self {
-            backend,
-            variable: OmVariableContainer::new(variable_data, offset_size),
+            backend: backend.clone(),
+            variable: OmVariableContainer::new(header_data.to_vec(), None),
         })
     }
 
@@ -130,8 +136,8 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
     ) -> Result<Self, OmFilesRsError> {
         let child_variable = self
             .backend
-            .get_bytes_with_fallback(offset_size.offset, offset_size.size)?
-            .into_owned();
+            .get_bytes(offset_size.offset, offset_size.size)?
+            .to_vec();
 
         Ok(Self {
             backend: self.backend.clone(),
@@ -157,10 +163,7 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
             io_size_merge,
         )?;
 
-        // Allocate chunk buffer
         let mut chunk_buffer = Vec::<u8>::with_capacity(decoder.buffer_size() as usize);
-
-        // Perform decoding
         self.backend
             .decode(&decoder.decoder, into, chunk_buffer.as_mut_slice())?;
 
@@ -204,8 +207,9 @@ impl OmFileReader<MmapFile> {
 
     /// Convenience initializer to create an `OmFileReader` from an existing `FileHandle`.
     pub fn from_file_handle(file_handle: File) -> Result<Self, OmFilesRsError> {
-        // TODO: Error handling
-        let mmap = MmapFile::new(file_handle, Mode::ReadOnly).unwrap();
+        let mmap = MmapFile::new(file_handle, Mode::ReadOnly).map_err(|e| {
+            OmFilesRsError::GenericError(format!("Failed to memory map file: {}", e))
+        })?;
         Self::new(Arc::new(mmap))
     }
 

@@ -1283,14 +1283,9 @@ fn test_nan() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[test]
-fn test_opening_legacy_file() {
-    // For legacy files, we need a file with the correct legacy header format
+#[apply(test!)]
+async fn test_opening_legacy_file() -> Result<(), Box<dyn std::error::Error>> {
     let file = "legacy_om_file.om";
-
-    // Create a minimal legacy OM file
-    // The header needs to make om_header_type return OM_HEADER_LEGACY
-    // Note: This is a simplified test that depends on the header detection logic
     {
         let mut data = vec![0u8; 40]; // Minimal header size
         data[0] = 79; // 'O'
@@ -1304,14 +1299,26 @@ fn test_opening_legacy_file() {
     let result = OmFileReader::<MmapFile>::from_file(file);
     assert!(result.is_ok());
     let reader = result.unwrap();
-    println!("Compression Type: {:?}", reader.compression());
     assert_eq!(reader.compression(), CompressionType::PforDelta2dInt16);
     assert_eq!(reader.get_dimensions(), [0u64, 0u64]);
     assert_eq!(reader.get_chunk_dimensions(), [0u64, 0u64]);
     assert_eq!(reader.get_name(), None);
 
+    // Try to open the legacy file and check properties of the reader with async reader
+    let file_for_reading = File::open(file)?;
+    let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
+    let async_reader = OmFileReaderAsync::new(Arc::new(read_backend)).await?;
+    assert_eq!(
+        async_reader.compression(),
+        CompressionType::PforDelta2dInt16
+    );
+    assert_eq!(async_reader.get_dimensions(), [0u64, 0u64]);
+    assert_eq!(async_reader.get_chunk_dimensions(), [0u64, 0u64]);
+    assert_eq!(async_reader.get_name(), None);
+
     // Clean up
     remove_file_if_exists(file);
+    Ok(())
 }
 
 #[apply(test!)]

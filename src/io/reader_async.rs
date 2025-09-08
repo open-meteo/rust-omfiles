@@ -56,8 +56,7 @@ implement_variable_methods!(OmFileReaderAsync<Backend>);
 impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsync<Backend> {
     /// Creates a new asynchronous reader for an Open-Meteo file.
     ///
-    /// This method reads the file header and necessary metadata to initialize the reader.
-    /// It handles both legacy format and trailer-based formats automatically.
+    /// This method tries to initialize from the file trailer and falls back to the legacy format if necessary.
     ///
     /// # Parameters
     /// - `backend`: An asynchronous backend that provides access to the file data
@@ -69,38 +68,47 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
     /// - `OmFilesRsError::FileTooSmall`: If the file is smaller than the required header size
     /// - `OmFilesRsError::NotAnOmFile`: If the file doesn't have a valid Open-Meteo format
     pub async fn new(backend: Arc<Backend>) -> Result<Self, OmFilesRsError> {
+        let file_size = backend.count_async();
+        let trailer_size = unsafe { om_trailer_size() };
+
+        // Try v3 (trailer-based) format first
+        if file_size >= trailer_size {
+            let trailer_data = backend
+                .get_bytes_async((file_size - trailer_size) as u64, trailer_size as u64)
+                .await?;
+            match unsafe { process_trailer(&trailer_data) } {
+                Ok(offset_size) => {
+                    let variable_data = backend
+                        .get_bytes_async(offset_size.offset, offset_size.size)
+                        .await?
+                        .to_vec();
+                    return Ok(Self {
+                        backend,
+                        variable: OmVariableContainer::new(variable_data, Some(offset_size)),
+                        semaphore: Arc::new(Semaphore::new(16)),
+                    });
+                }
+                Err(OmFilesRsError::NotAnOmFile) => {
+                    // fall through to legacy check
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        // Fallback: Try v2 (legacy) format
         let header_size = unsafe { om_header_size() };
-        if backend.count_async() < header_size {
+        if file_size < header_size {
             return Err(OmFilesRsError::FileTooSmall);
         }
         let header_data = backend.get_bytes_async(0, header_size as u64).await?;
         let header_type = unsafe { om_header_type(header_data.as_ptr() as *const c_void) };
-
-        let (variable_data, offset_size) = {
-            match header_type {
-                OmHeaderType_t::OM_HEADER_LEGACY => (header_data, None),
-                OmHeaderType_t::OM_HEADER_READ_TRAILER => unsafe {
-                    let file_size = backend.count_async();
-                    let trailer_size = om_trailer_size();
-                    let trailer_data = backend
-                        .get_bytes_async((file_size - trailer_size) as u64, trailer_size as u64)
-                        .await?;
-
-                    let offset_size = process_trailer(&trailer_data)?;
-                    let variable_data = backend
-                        .get_bytes_async(offset_size.offset, offset_size.size)
-                        .await?;
-                    (variable_data, Some(offset_size))
-                },
-                OmHeaderType_t::OM_HEADER_INVALID => {
-                    return Err(OmFilesRsError::NotAnOmFile);
-                }
-            }
-        };
+        if header_type != OmHeaderType_t::OM_HEADER_LEGACY {
+            return Err(OmFilesRsError::NotAnOmFile);
+        }
 
         Ok(Self {
             backend,
-            variable: OmVariableContainer::new(variable_data, offset_size),
+            variable: OmVariableContainer::new(header_data.to_vec(), None),
             semaphore: Arc::new(Semaphore::new(16)),
         })
     }
