@@ -10,8 +10,6 @@ pub mod io {
     pub mod reader_async;
     pub(crate) mod reader_utils;
     pub(crate) mod variable;
-    #[macro_use]
-    pub(crate) mod variable_impl;
     pub(crate) mod wrapped_decoder;
     pub mod writer;
 }

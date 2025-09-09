@@ -119,8 +119,8 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
 }
 
 pub struct OmFileReaderScalar<Backend> {
-    backend: Arc<Backend>,
-    variable: OmVariableContainer,
+    pub(crate) backend: Arc<Backend>,
+    pub(crate) variable: OmVariableContainer,
 }
 
 impl<Backend: OmFileReaderBackend> GenericOmVariable for OmFileReaderScalar<Backend> {

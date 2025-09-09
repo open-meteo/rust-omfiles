@@ -7,13 +7,10 @@
 
 use crate::core::data_types::OmFileArrayDataType;
 use crate::errors::OmFilesRsError;
+use crate::io::reader::OmFileReaderScalar;
 use crate::io::reader_utils::process_trailer;
 use crate::io::variable::OmVariableContainer;
-use crate::io::variable_impl::{
-    implement_array_variable_methods, implement_common_variable_methods,
-    implement_scalar_variable_methods,
-};
-use crate::traits::{GenericOmVariable, OmFileReaderBackendAsync};
+use crate::traits::{ArrayOmVariable, GenericOmVariable, OmFileReaderBackendAsync};
 use async_executor::{Executor, Task};
 use async_lock::Semaphore;
 use ndarray::ArrayD;
@@ -118,6 +115,16 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
         })
     }
 
+    pub fn expect_scalar(self) -> Result<OmFileReaderScalar<Backend>, OmFilesRsError> {
+        if self.data_type().is_array() {
+            return Err(OmFilesRsError::InvalidDataType);
+        }
+        Ok(OmFileReaderScalar {
+            backend: self.backend,
+            variable: self.variable,
+        })
+    }
+
     pub fn expect_array(self) -> Result<OmFileReaderAsyncArray<Backend>, OmFilesRsError> {
         self.expect_array_with_io_sizes(65536, 512)
     }
@@ -152,7 +159,21 @@ pub struct OmFileReaderAsyncArray<Backend> {
     io_size_merge: u64,
 }
 
-implement_array_variable_methods!(OmFileReaderAsyncArray<Backend>);
+impl<Backend: OmFileReaderBackendAsync> GenericOmVariable for OmFileReaderAsyncArray<Backend> {
+    fn variable(&self) -> &OmVariableContainer {
+        &self.variable
+    }
+}
+
+impl<Backend: OmFileReaderBackendAsync> ArrayOmVariable for OmFileReaderAsyncArray<Backend> {
+    fn io_size_max(&self) -> u64 {
+        self.io_size_max
+    }
+
+    fn io_size_merge(&self) -> u64 {
+        self.io_size_merge
+    }
+}
 
 impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyncArray<Backend> {
     /// Sets the maximum number of concurrent fetch operations.
