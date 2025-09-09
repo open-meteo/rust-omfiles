@@ -10,7 +10,10 @@ use crate::errors::OmFilesError;
 use crate::io::reader::OmFileScalar;
 use crate::io::reader_utils::process_trailer;
 use crate::io::variable::OmVariableContainer;
-use crate::traits::{ArrayOmVariable, OmFileReaderBackendAsync, OmFileVariable};
+use crate::traits::{
+    ArrayOmVariable, ArrayOmVariableImpl, OmFileReaderBackendAsync, OmFileVariable,
+    OmFileVariableImpl,
+};
 use async_executor::{Executor, Task};
 use async_lock::Semaphore;
 use ndarray::ArrayD;
@@ -48,7 +51,7 @@ pub struct OmFileReaderAsync<Backend> {
     variable: OmVariableContainer,
 }
 
-impl<Backend: OmFileReaderBackendAsync> OmFileVariable for OmFileReaderAsync<Backend> {
+impl<Backend: OmFileReaderBackendAsync> OmFileVariableImpl for OmFileReaderAsync<Backend> {
     fn variable(&self) -> &OmVariableContainer {
         &self.variable
     }
@@ -159,13 +162,13 @@ pub struct OmFileAsyncArray<Backend> {
     io_size_merge: u64,
 }
 
-impl<Backend: OmFileReaderBackendAsync> OmFileVariable for OmFileAsyncArray<Backend> {
+impl<Backend: OmFileReaderBackendAsync> OmFileVariableImpl for OmFileAsyncArray<Backend> {
     fn variable(&self) -> &OmVariableContainer {
         &self.variable
     }
 }
 
-impl<Backend: OmFileReaderBackendAsync> ArrayOmVariable for OmFileAsyncArray<Backend> {
+impl<Backend: OmFileReaderBackendAsync> ArrayOmVariableImpl for OmFileAsyncArray<Backend> {
     fn io_size_max(&self) -> u64 {
         self.io_size_max
     }

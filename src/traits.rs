@@ -1,8 +1,7 @@
 use crate::core::c_defaults::{c_error_string, new_data_read, new_index_read};
 use crate::core::data_types::{DataType, OmFileArrayDataType};
 use crate::errors::OmFilesError;
-use crate::io::variable::OmVariableContainer;
-use crate::io::writer::OmOffsetSize;
+use crate::io::variable::{OmOffsetSize, OmVariableContainer};
 use ndarray::ArrayD;
 use om_file_format_sys::{
     OmDecoder_t, OmError_t, om_decoder_decode_chunks, om_decoder_next_data_read,
@@ -104,10 +103,23 @@ pub trait OmFileReaderBackendAsync: Send + Sync {
     ) -> impl Future<Output = Result<Vec<u8>, OmFilesError>> + Send;
 }
 
-pub trait OmFileVariable {
+// Private trait - users can't see this
+pub(crate) trait OmFileVariableImpl {
     fn variable(&self) -> &OmVariableContainer;
+}
 
+// Public trait - this is what users see
+pub trait OmFileVariable {
     /// Returns the data type of the variable
+    fn data_type(&self) -> DataType;
+    /// Returns the name of the variable, if available
+    fn get_name(&self) -> Option<String>;
+    /// Returns the number of children of the variable
+    fn number_of_children(&self) -> u32;
+}
+
+// Blanket implementation for any type that implements the private trait
+impl<T: OmFileVariableImpl> OmFileVariable for T {
     fn data_type(&self) -> DataType {
         unsafe {
             DataType::try_from(
@@ -117,7 +129,6 @@ pub trait OmFileVariable {
         }
     }
 
-    /// Returns the name of the variable, if available
     fn get_name(&self) -> Option<String> {
         unsafe {
             let name = om_file_format_sys::om_variable_get_name(*self.variable().variable);
@@ -129,13 +140,18 @@ pub trait OmFileVariable {
         }
     }
 
-    /// Returns the number of children of the variable
     fn number_of_children(&self) -> u32 {
         unsafe { om_file_format_sys::om_variable_get_children_count(*self.variable().variable) }
     }
 }
 
-pub trait ScalarOmVariable: OmFileVariable {
+pub trait ScalarOmVariable {
+    /// Read a scalar value of the specified type
+    fn read_scalar<T: crate::core::data_types::OmFileScalarDataType>(&self) -> Option<T>;
+}
+
+// Blanket implementation for any type that implements the private trait
+impl<U: OmFileVariableImpl + OmFileVariable> ScalarOmVariable for U {
     /// Read a scalar value of the specified type
     fn read_scalar<T: crate::core::data_types::OmFileScalarDataType>(&self) -> Option<T> {
         if T::DATA_TYPE_SCALAR != self.data_type() {
@@ -165,10 +181,34 @@ pub trait ScalarOmVariable: OmFileVariable {
     }
 }
 
-pub trait ArrayOmVariable: OmFileVariable {
+pub(crate) trait ArrayOmVariableImpl {
     fn io_size_max(&self) -> u64;
     fn io_size_merge(&self) -> u64;
+}
 
+pub trait ArrayOmVariable {
+    /// Returns the compression type of the variable
+    fn compression(&self) -> crate::core::compression::CompressionType;
+    /// Returns the scale factor of the variable
+    fn scale_factor(&self) -> f32;
+    /// Returns the add offset of the variable
+    fn add_offset(&self) -> f32;
+    /// Returns the dimensions of the variable
+    fn get_dimensions(&self) -> &[u64];
+    /// Returns the chunk dimensions of the variable
+    fn get_chunk_dimensions(&self) -> &[u64];
+
+    /// Prepare common parameters for reading data
+    fn prepare_read_parameters<T: OmFileArrayDataType>(
+        &self,
+        dim_read: &[Range<u64>],
+        into_cube_offset: &[u64],
+        into_cube_dimension: &[u64],
+    ) -> Result<crate::io::wrapped_decoder::WrappedDecoder, OmFilesError>;
+}
+
+// Blanket implementation for any type that implements the private trait
+impl<U: ArrayOmVariableImpl + OmFileVariableImpl> ArrayOmVariable for U {
     /// Returns the compression type of the variable
     fn compression(&self) -> crate::core::compression::CompressionType {
         unsafe {
@@ -243,7 +283,7 @@ pub trait ArrayOmVariable: OmFileVariable {
     }
 }
 
-pub trait OmFileReadable: OmFileVariable {
+pub trait OmFileReadable: OmFileVariableImpl + OmFileVariable {
     type ChildType: OmFileReadable;
     type Backend: OmFileReaderBackend;
 

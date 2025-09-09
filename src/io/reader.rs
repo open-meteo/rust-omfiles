@@ -4,7 +4,8 @@ use crate::errors::OmFilesError;
 use crate::io::reader_utils::process_trailer;
 use crate::io::variable::OmVariableContainer;
 use crate::traits::{
-    ArrayOmVariable, OmFileReadable, OmFileReaderBackend, OmFileVariable, ScalarOmVariable,
+    ArrayOmVariable, ArrayOmVariableImpl, OmFileReadable, OmFileReaderBackend, OmFileVariable,
+    OmFileVariableImpl,
 };
 use ndarray::ArrayD;
 use num_traits::Zero;
@@ -21,7 +22,7 @@ pub struct OmFileReader<Backend> {
     pub variable: OmVariableContainer,
 }
 
-impl<Backend: OmFileReaderBackend> OmFileVariable for OmFileReader<Backend> {
+impl<Backend: OmFileReaderBackend> OmFileVariableImpl for OmFileReader<Backend> {
     fn variable(&self) -> &OmVariableContainer {
         &self.variable
     }
@@ -123,7 +124,7 @@ pub struct OmFileScalar<Backend> {
     pub(crate) variable: OmVariableContainer,
 }
 
-impl<Backend: OmFileReaderBackend> OmFileVariable for OmFileScalar<Backend> {
+impl<Backend: OmFileReaderBackend> OmFileVariableImpl for OmFileScalar<Backend> {
     fn variable(&self) -> &OmVariableContainer {
         &self.variable
     }
@@ -145,8 +146,6 @@ impl<Backend: OmFileReaderBackend> OmFileReadable for OmFileScalar<Backend> {
     }
 }
 
-impl<Backend: OmFileReaderBackend> ScalarOmVariable for OmFileScalar<Backend> {}
-
 pub struct OmFileArray<Backend> {
     /// The backend that provides data via the get_bytes method
     pub backend: Arc<Backend>,
@@ -157,7 +156,7 @@ pub struct OmFileArray<Backend> {
     io_size_merge: u64,
 }
 
-impl<Backend: OmFileReaderBackend> OmFileVariable for OmFileArray<Backend> {
+impl<Backend: OmFileReaderBackend> OmFileVariableImpl for OmFileArray<Backend> {
     fn variable(&self) -> &OmVariableContainer {
         &self.variable
     }
@@ -179,7 +178,7 @@ impl<Backend: OmFileReaderBackend> OmFileReadable for OmFileArray<Backend> {
     }
 }
 
-impl<Backend: OmFileReaderBackend> ArrayOmVariable for OmFileArray<Backend> {
+impl<Backend: OmFileReaderBackend> ArrayOmVariableImpl for OmFileArray<Backend> {
     fn io_size_max(&self) -> u64 {
         self.io_size_max
     }

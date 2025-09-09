@@ -12,11 +12,8 @@ use omfiles::{
     },
     core::{compression::CompressionType, data_types::DataType},
     errors::OmFilesError,
-    io::{
-        reader::OmFileReader,
-        reader_async::OmFileReaderAsync,
-        writer::{OmFileWriter, OmOffsetSize},
-    },
+    io::variable::OmOffsetSize,
+    io::{reader::OmFileReader, reader_async::OmFileReaderAsync, writer::OmFileWriter},
     traits::{OmFileReadable, OmFileReaderBackend, OmFileVariable, ScalarOmVariable},
 };
 use smol_macros::test;

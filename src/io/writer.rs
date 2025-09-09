@@ -3,6 +3,7 @@ use crate::core::compression::CompressionType;
 use crate::core::data_types::{DataType, OmFileArrayDataType, OmFileScalarDataType, OmNone};
 use crate::errors::OmFilesError;
 use crate::io::buffered_writer::OmBufferedWriter;
+use crate::io::variable::OmOffsetSize;
 use crate::traits::OmFileWriterBackend;
 use ndarray::ArrayViewD;
 use om_file_format_sys::{
@@ -15,18 +16,6 @@ use om_file_format_sys::{
 use std::borrow::BorrowMut;
 use std::marker::PhantomData;
 use std::os::raw::c_void;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct OmOffsetSize {
-    pub offset: u64,
-    pub size: u64,
-}
-
-impl OmOffsetSize {
-    pub fn new(offset: u64, size: u64) -> Self {
-        Self { offset, size }
-    }
-}
 
 pub struct OmFileWriter<Backend: OmFileWriterBackend> {
     buffer: OmBufferedWriter<Backend>,

@@ -9,7 +9,7 @@ pub mod io {
     pub mod reader;
     pub mod reader_async;
     pub(crate) mod reader_utils;
-    pub(crate) mod variable;
+    pub mod variable;
     pub(crate) mod wrapped_decoder;
     pub mod writer;
 }
