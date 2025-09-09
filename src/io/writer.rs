@@ -1,7 +1,7 @@
 use crate::core::c_defaults::{c_error_string, create_uninit_encoder};
 use crate::core::compression::CompressionType;
 use crate::core::data_types::{DataType, OmFileArrayDataType, OmFileScalarDataType, OmNone};
-use crate::errors::OmFilesRsError;
+use crate::errors::OmFilesError;
 use crate::io::buffered_writer::OmBufferedWriter;
 use crate::traits::OmFileWriterBackend;
 use ndarray::ArrayViewD;
@@ -39,7 +39,7 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         }
     }
 
-    fn write_header_if_required(&mut self) -> Result<(), OmFilesRsError> {
+    fn write_header_if_required(&mut self) -> Result<(), OmFilesError> {
         if self.buffer.total_bytes_written > 0 {
             return Ok(());
         }
@@ -57,7 +57,7 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         value: T,
         name: &str,
         children: &[OmOffsetSize],
-    ) -> Result<OmOffsetSize, OmFilesRsError> {
+    ) -> Result<OmOffsetSize, OmFilesError> {
         self.write_header_if_required()?;
 
         assert!(name.len() <= u16::MAX as usize);
@@ -70,7 +70,7 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         self.buffer.align_to_8_bytes()?;
         let offset = self.buffer.total_bytes_written as u64;
 
-        let size = value.with_raw_bytes(|bytes| -> Result<usize, OmFilesRsError> {
+        let size = value.with_raw_bytes(|bytes| -> Result<usize, OmFilesError> {
             let size = unsafe {
                 om_variable_write_scalar_size(
                     name.len() as u16,
@@ -108,7 +108,7 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         &mut self,
         name: &str,
         children: &[OmOffsetSize],
-    ) -> Result<OmOffsetSize, OmFilesRsError> {
+    ) -> Result<OmOffsetSize, OmFilesError> {
         // Use write_scalar with OmNone
         self.write_scalar(OmNone::default(), name, children)
     }
@@ -120,7 +120,7 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         compression: CompressionType,
         scale_factor: f32,
         add_offset: f32,
-    ) -> Result<OmFileWriterArray<'a, T, Backend>, OmFilesRsError> {
+    ) -> Result<OmFileWriterArray<'a, T, Backend>, OmFilesError> {
         let _ = &self.write_header_if_required()?;
 
         let array_writer = OmFileWriterArray::new(
@@ -141,7 +141,7 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         array: OmFileWriterArrayFinalized,
         name: &str,
         children: &[OmOffsetSize],
-    ) -> Result<OmOffsetSize, OmFilesRsError> {
+    ) -> Result<OmOffsetSize, OmFilesError> {
         self.write_header_if_required()?;
 
         debug_assert!(name.len() <= u16::MAX as usize);
@@ -186,7 +186,7 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         Ok(OmOffsetSize::new(offset, size as u64))
     }
 
-    pub fn write_trailer(&mut self, root_variable: OmOffsetSize) -> Result<(), OmFilesRsError> {
+    pub fn write_trailer(&mut self, root_variable: OmOffsetSize) -> Result<(), OmFilesError> {
         self.write_header_if_required()?;
         self.buffer.align_to_8_bytes()?;
 
@@ -231,12 +231,12 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
         scale_factor: f32,
         add_offset: f32,
         buffer: &'a mut OmBufferedWriter<Backend>,
-    ) -> Result<Self, OmFilesRsError> {
+    ) -> Result<Self, OmFilesError> {
         if data_type != OmType::DATA_TYPE_ARRAY {
-            return Err(OmFilesRsError::InvalidDataType);
+            return Err(OmFilesError::InvalidDataType);
         }
         if dimensions.len() != chunk_dimensions.len() {
-            return Err(OmFilesRsError::MismatchingCubeDimensionLength);
+            return Err(OmFilesError::MismatchingCubeDimensionLength);
         }
 
         let chunks = chunk_dimensions;
@@ -255,7 +255,7 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
             )
         };
         if error != OmError_t::ERROR_OK {
-            return Err(OmFilesRsError::FileWriterError {
+            return Err(OmFilesError::FileWriterError {
                 errno: error as i32,
                 error: c_error_string(error),
             });
@@ -291,13 +291,13 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
         array: ArrayViewD<OmType>,
         array_offset: Option<&[u64]>,
         array_count: Option<&[u64]>,
-    ) -> Result<(), OmFilesRsError> {
+    ) -> Result<(), OmFilesError> {
         let array_dimensions = array
             .shape()
             .iter()
             .map(|&x| x as u64)
             .collect::<Vec<u64>>();
-        let array = array.as_slice().ok_or(OmFilesRsError::ArrayNotContiguous)?;
+        let array = array.as_slice().ok_or(OmFilesError::ArrayNotContiguous)?;
         self.write_data_flat(array, Some(&array_dimensions), array_offset, array_count)
     }
 
@@ -308,31 +308,31 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
         array_dimensions: Option<&[u64]>,
         array_offset: Option<&[u64]>,
         array_count: Option<&[u64]>,
-    ) -> Result<(), OmFilesRsError> {
+    ) -> Result<(), OmFilesError> {
         let array_dimensions = array_dimensions.unwrap_or(&self.dimensions);
         let default_offset = vec![0; array_dimensions.len()];
         let array_offset = array_offset.unwrap_or(default_offset.as_slice());
         let array_count = array_count.unwrap_or(array_dimensions);
 
         if array_count.len() != self.dimensions.len() {
-            return Err(OmFilesRsError::ChunkHasWrongNumberOfElements);
+            return Err(OmFilesError::ChunkHasWrongNumberOfElements);
         }
         for (array_dim, max_dim) in array_count.iter().zip(self.dimensions.iter()) {
             if array_dim > max_dim {
-                return Err(OmFilesRsError::ChunkHasWrongNumberOfElements);
+                return Err(OmFilesError::ChunkHasWrongNumberOfElements);
             }
         }
 
         let array_size: u64 = array_dimensions.iter().product::<u64>();
         if array.len() as u64 != array_size {
-            return Err(OmFilesRsError::ChunkHasWrongNumberOfElements);
+            return Err(OmFilesError::ChunkHasWrongNumberOfElements);
         }
         for (dim, (offset, count)) in array_dimensions
             .iter()
             .zip(array_offset.iter().zip(array_count.iter()))
         {
             if offset + count > *dim {
-                return Err(OmFilesRsError::OffsetAndCountExceedDimension {
+                return Err(OmFilesError::OffsetAndCountExceedDimension {
                     offset: *offset,
                     count: *count,
                     dimension: *dim,

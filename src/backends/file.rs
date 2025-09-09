@@ -6,34 +6,34 @@
 
 use std::{fs::File, io::Write};
 
-use crate::{errors::OmFilesRsError, traits::OmFileWriterBackend};
+use crate::{errors::OmFilesError, traits::OmFileWriterBackend};
 
 impl OmFileWriterBackend for &File {
-    fn write(&mut self, data: &[u8]) -> Result<(), OmFilesRsError> {
+    fn write(&mut self, data: &[u8]) -> Result<(), OmFilesError> {
         self.write_all(data).map_err(|e| map_io_error(e))?;
         Ok(())
     }
 
-    fn synchronize(&self) -> Result<(), OmFilesRsError> {
+    fn synchronize(&self) -> Result<(), OmFilesError> {
         self.sync_all().map_err(|e| map_io_error(e))?;
         Ok(())
     }
 }
 
 impl OmFileWriterBackend for File {
-    fn write(&mut self, data: &[u8]) -> Result<(), OmFilesRsError> {
+    fn write(&mut self, data: &[u8]) -> Result<(), OmFilesError> {
         self.write_all(data).map_err(|e| map_io_error(e))?;
         Ok(())
     }
 
-    fn synchronize(&self) -> Result<(), OmFilesRsError> {
+    fn synchronize(&self) -> Result<(), OmFilesError> {
         self.sync_all().map_err(|e| map_io_error(e))?;
         Ok(())
     }
 }
 
-fn map_io_error(e: std::io::Error) -> OmFilesRsError {
-    OmFilesRsError::FileWriterError {
+fn map_io_error(e: std::io::Error) -> OmFilesError {
+    OmFilesError::FileWriterError {
         errno: e.raw_os_error().unwrap_or(0),
         error: e.to_string(),
     }

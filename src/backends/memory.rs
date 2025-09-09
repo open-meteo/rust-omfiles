@@ -1,7 +1,7 @@
 //! In-memory backend implementation for OmFiles.
 
 use crate::{
-    errors::OmFilesRsError,
+    errors::OmFilesError,
     traits::{OmFileReaderBackend, OmFileWriterBackend},
 };
 
@@ -17,12 +17,12 @@ impl InMemoryBackend {
 }
 
 impl OmFileWriterBackend for &mut InMemoryBackend {
-    fn write(&mut self, data: &[u8]) -> Result<(), OmFilesRsError> {
+    fn write(&mut self, data: &[u8]) -> Result<(), OmFilesError> {
         self.data.extend_from_slice(data);
         Ok(())
     }
 
-    fn synchronize(&self) -> Result<(), OmFilesRsError> {
+    fn synchronize(&self) -> Result<(), OmFilesError> {
         // No-op for in-memory backend
         Ok(())
     }
@@ -39,7 +39,7 @@ impl OmFileReaderBackend for InMemoryBackend {
         // No-op for in-memory backend
     }
 
-    fn get_bytes(&self, offset: u64, count: u64) -> Result<Self::Bytes<'_>, OmFilesRsError> {
+    fn get_bytes(&self, offset: u64, count: u64) -> Result<Self::Bytes<'_>, OmFilesError> {
         let index_range = (offset as usize)..(offset + count) as usize;
         Ok(&self.data[index_range])
     }

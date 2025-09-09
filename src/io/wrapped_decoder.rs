@@ -1,6 +1,6 @@
 use crate::core::c_defaults::new_index_read;
 use crate::core::c_defaults::{c_error_string, create_uninit_decoder, new_data_read};
-use crate::{errors::OmFilesRsError, io::variable::OmVariablePtr};
+use crate::{errors::OmFilesError, io::variable::OmVariablePtr};
 use om_file_format_sys::{
     OmDecoder_indexRead_t, OmDecoder_t, OmError_t, OmRange_t, om_decoder_decode_chunks,
     om_decoder_init, om_decoder_next_data_read, om_decoder_next_index_read,
@@ -35,7 +35,7 @@ impl WrappedDecoder {
         cube_dim: &[u64],
         io_size_merge: u64,
         io_size_max: u64,
-    ) -> Result<Self, OmFilesRsError> {
+    ) -> Result<Self, OmFilesError> {
         let mut decoder = unsafe { create_uninit_decoder() };
         let error = unsafe {
             om_decoder_init(
@@ -53,7 +53,7 @@ impl WrappedDecoder {
 
         if error != OmError_t::ERROR_OK {
             let error_string = c_error_string(error);
-            return Err(OmFilesRsError::DecoderError(error_string));
+            return Err(OmFilesError::DecoderError(error_string));
         }
 
         Ok(Self {
@@ -75,7 +75,7 @@ impl WrappedDecoder {
         data: &[u8],
         output: &mut [u8], // Raw bytes of output array
         chunk_buffer: &mut [u8],
-    ) -> Result<(), OmFilesRsError> {
+    ) -> Result<(), OmFilesError> {
         let mut error = OmError_t::ERROR_OK;
 
         let success = unsafe {
@@ -92,7 +92,7 @@ impl WrappedDecoder {
 
         if !success {
             let error_string = c_error_string(error);
-            return Err(OmFilesRsError::DecoderError(error_string));
+            return Err(OmFilesError::DecoderError(error_string));
         }
 
         Ok(())
@@ -113,9 +113,9 @@ impl WrappedDecoder {
         index_read: &OmDecoder_indexRead_t,
         index_data: &[u8],
         mut callback: F,
-    ) -> Result<(), OmFilesRsError>
+    ) -> Result<(), OmFilesError>
     where
-        F: FnMut(u64, u64, OmRange_t) -> Result<(), OmFilesRsError>,
+        F: FnMut(u64, u64, OmRange_t) -> Result<(), OmFilesError>,
     {
         let mut data_read = new_data_read(index_read);
         let mut error = OmError_t::ERROR_OK;
@@ -131,7 +131,7 @@ impl WrappedDecoder {
         } {
             if error != OmError_t::ERROR_OK {
                 let error_string = c_error_string(error);
-                return Err(OmFilesRsError::DecoderError(error_string));
+                return Err(OmFilesError::DecoderError(error_string));
             }
             // Pass relevant data to the callback
             callback(data_read.offset, data_read.count, data_read.chunkIndex)?;

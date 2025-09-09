@@ -11,13 +11,13 @@ use omfiles::{
         mmapfile::{MmapFile, Mode},
     },
     core::{compression::CompressionType, data_types::DataType},
-    errors::OmFilesRsError,
+    errors::OmFilesError,
     io::{
         reader::OmFileReader,
         reader_async::OmFileReaderAsync,
         writer::{OmFileWriter, OmOffsetSize},
     },
-    traits::{GenericOmVariable, OmFileReaderBackend, OmVariableReadable, ScalarOmVariable},
+    traits::{OmFileReadable, OmFileReaderBackend, OmFileVariable, ScalarOmVariable},
 };
 use smol_macros::test;
 use std::{
@@ -369,7 +369,7 @@ fn test_write_more_data_than_expected() -> Result<(), Box<dyn std::error::Error>
     let result = writer.write_data(too_much_data.view(), None, None);
     assert!(result.is_err());
     let err = result.err().unwrap();
-    assert_eq!(err, OmFilesRsError::ChunkHasWrongNumberOfElements);
+    assert_eq!(err, OmFilesError::ChunkHasWrongNumberOfElements);
 
     Ok(())
 }

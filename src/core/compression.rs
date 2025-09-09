@@ -1,4 +1,4 @@
-use crate::errors::OmFilesRsError;
+use crate::errors::OmFilesError;
 use om_file_format_sys::OmCompression_t;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -24,7 +24,7 @@ impl CompressionType {
 }
 
 impl TryFrom<u8> for CompressionType {
-    type Error = OmFilesRsError;
+    type Error = OmFilesError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
@@ -33,7 +33,7 @@ impl TryFrom<u8> for CompressionType {
             2 => Ok(CompressionType::PforDelta2d),
             3 => Ok(CompressionType::PforDelta2dInt16Logarithmic),
             4 => Ok(CompressionType::None),
-            _ => Err(OmFilesRsError::InvalidCompressionType),
+            _ => Err(OmFilesError::InvalidCompressionType),
         }
     }
 }

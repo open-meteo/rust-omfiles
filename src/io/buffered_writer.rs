@@ -1,4 +1,4 @@
-use crate::errors::OmFilesRsError;
+use crate::errors::OmFilesError;
 use crate::traits::OmFileWriterBackend;
 use crate::utils::divide_rounded_up;
 
@@ -37,7 +37,7 @@ impl<Backend: OmFileWriterBackend> OmBufferedWriter<Backend> {
     }
 
     /// Add empty space if required to align to 8 bytes
-    pub fn align_to_8_bytes(&mut self) -> Result<(), OmFilesRsError> {
+    pub fn align_to_8_bytes(&mut self) -> Result<(), OmFilesError> {
         let bytes_to_pad = 8 - self.total_bytes_written % 8;
         if bytes_to_pad == 8 {
             return Ok(());
@@ -66,7 +66,7 @@ impl<Backend: OmFileWriterBackend> OmBufferedWriter<Backend> {
     }
 
     /// Ensure the buffer has at least a minimum capacity
-    pub fn reallocate(&mut self, minimum_capacity: usize) -> Result<(), OmFilesRsError> {
+    pub fn reallocate(&mut self, minimum_capacity: usize) -> Result<(), OmFilesError> {
         if self.remaining_capacity() >= minimum_capacity {
             return Ok(());
         }
@@ -88,7 +88,7 @@ impl<Backend: OmFileWriterBackend> OmBufferedWriter<Backend> {
     }
 
     /// Write buffer to file
-    pub fn write_to_file(&mut self) -> Result<(), OmFilesRsError> {
+    pub fn write_to_file(&mut self) -> Result<(), OmFilesError> {
         if self.write_position == 0 {
             return Ok(());
         }

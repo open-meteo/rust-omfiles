@@ -6,7 +6,7 @@ use memmap2::{Mmap, MmapMut, MmapOptions};
 use std::fs::File;
 
 use crate::{
-    errors::OmFilesRsError,
+    errors::OmFilesError,
     traits::{OmFileReaderBackend, OmFileReaderBackendAsync},
 };
 
@@ -138,7 +138,7 @@ impl OmFileReaderBackend for MmapFile {
         self.prefetch_data_advice(offset, count, MAdvice::WillNeed);
     }
 
-    fn get_bytes(&self, offset: u64, count: u64) -> Result<Self::Bytes<'_>, OmFilesRsError> {
+    fn get_bytes(&self, offset: u64, count: u64) -> Result<Self::Bytes<'_>, OmFilesError> {
         let index_range = (offset as usize)..(offset + count) as usize;
         match self.data {
             MmapType::ReadOnly(ref mmap) => Ok(&mmap[index_range]),
@@ -152,7 +152,7 @@ impl OmFileReaderBackendAsync for MmapFile {
         self.data.len()
     }
 
-    async fn get_bytes_async(&self, offset: u64, count: u64) -> Result<Vec<u8>, OmFilesRsError> {
+    async fn get_bytes_async(&self, offset: u64, count: u64) -> Result<Vec<u8>, OmFilesError> {
         let data = self.get_bytes(offset, count);
         Ok(data?.to_vec())
     }

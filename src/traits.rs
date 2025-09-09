@@ -1,6 +1,6 @@
 use crate::core::c_defaults::{c_error_string, new_data_read, new_index_read};
 use crate::core::data_types::{DataType, OmFileArrayDataType};
-use crate::errors::OmFilesRsError;
+use crate::errors::OmFilesError;
 use crate::io::variable::OmVariableContainer;
 use crate::io::writer::OmOffsetSize;
 use ndarray::ArrayD;
@@ -14,8 +14,8 @@ use std::ops::{Deref, Range};
 use std::os::raw::c_void;
 
 pub trait OmFileWriterBackend {
-    fn write(&mut self, data: &[u8]) -> Result<(), OmFilesRsError>;
-    fn synchronize(&self) -> Result<(), OmFilesRsError>;
+    fn write(&mut self, data: &[u8]) -> Result<(), OmFilesError>;
+    fn synchronize(&self) -> Result<(), OmFilesError>;
 }
 
 /// A trait for reading byte data synchronously from different storage backends.
@@ -36,17 +36,17 @@ pub trait OmFileReaderBackend: Send + Sync {
     /// Returns a container of bytes from the backend.
     /// This might be a borrowed slice for zero-copy backends (like mmap)
     /// or an owned `Vec<u8>` for others (like file IO).
-    fn get_bytes(&self, _offset: u64, _count: u64) -> Result<Self::Bytes<'_>, OmFilesRsError>;
+    fn get_bytes(&self, _offset: u64, _count: u64) -> Result<Self::Bytes<'_>, OmFilesError>;
 
     fn decode<OmType: OmFileArrayDataType>(
         &self,
         decoder: &OmDecoder_t,
         into: &mut ArrayD<OmType>,
         chunk_buffer: &mut [u8],
-    ) -> Result<(), OmFilesRsError> {
+    ) -> Result<(), OmFilesError> {
         let into_ptr = into
             .as_slice_mut()
-            .ok_or(OmFilesRsError::ArrayNotContiguous)?
+            .ok_or(OmFilesError::ArrayNotContiguous)?
             .as_mut_ptr();
 
         let mut index_read = new_index_read(decoder);
@@ -79,12 +79,12 @@ pub trait OmFileReaderBackend: Send + Sync {
                         &mut error,
                     ) {
                         let error_string = c_error_string(error);
-                        return Err(OmFilesRsError::DecoderError(error_string));
+                        return Err(OmFilesError::DecoderError(error_string));
                     }
                 }
                 if error != OmError_t::ERROR_OK {
                     let error_string = c_error_string(error);
-                    return Err(OmFilesRsError::DecoderError(error_string));
+                    return Err(OmFilesError::DecoderError(error_string));
                 }
             }
         }
@@ -101,10 +101,10 @@ pub trait OmFileReaderBackendAsync: Send + Sync {
         &self,
         _offset: u64,
         _count: u64,
-    ) -> impl Future<Output = Result<Vec<u8>, OmFilesRsError>> + Send;
+    ) -> impl Future<Output = Result<Vec<u8>, OmFilesError>> + Send;
 }
 
-pub trait GenericOmVariable {
+pub trait OmFileVariable {
     fn variable(&self) -> &OmVariableContainer;
 
     /// Returns the data type of the variable
@@ -135,7 +135,7 @@ pub trait GenericOmVariable {
     }
 }
 
-pub trait ScalarOmVariable: GenericOmVariable {
+pub trait ScalarOmVariable: OmFileVariable {
     /// Read a scalar value of the specified type
     fn read_scalar<T: crate::core::data_types::OmFileScalarDataType>(&self) -> Option<T> {
         if T::DATA_TYPE_SCALAR != self.data_type() {
@@ -165,7 +165,7 @@ pub trait ScalarOmVariable: GenericOmVariable {
     }
 }
 
-pub trait ArrayOmVariable: GenericOmVariable {
+pub trait ArrayOmVariable: OmFileVariable {
     fn io_size_max(&self) -> u64;
     fn io_size_merge(&self) -> u64;
 
@@ -211,7 +211,7 @@ pub trait ArrayOmVariable: GenericOmVariable {
         dim_read: &[Range<u64>],
         into_cube_offset: &[u64],
         into_cube_dimension: &[u64],
-    ) -> Result<crate::io::wrapped_decoder::WrappedDecoder, OmFilesRsError> {
+    ) -> Result<crate::io::wrapped_decoder::WrappedDecoder, OmFilesError> {
         let n_dimensions_read = dim_read.len();
         let n_dims = self.get_dimensions().len();
 
@@ -220,7 +220,7 @@ pub trait ArrayOmVariable: GenericOmVariable {
             || n_dimensions_read != into_cube_offset.len()
             || n_dimensions_read != into_cube_dimension.len()
         {
-            return Err(OmFilesRsError::MismatchingCubeDimensionLength);
+            return Err(OmFilesError::MismatchingCubeDimensionLength);
         }
 
         // Prepare read parameters
@@ -243,8 +243,8 @@ pub trait ArrayOmVariable: GenericOmVariable {
     }
 }
 
-pub trait OmVariableReadable: GenericOmVariable {
-    type ChildType: OmVariableReadable;
+pub trait OmFileReadable: OmFileVariable {
+    type ChildType: OmFileReadable;
     type Backend: OmFileReaderBackend;
 
     fn new_with_variable(&self, variable: OmVariableContainer) -> Self::ChildType;
@@ -313,7 +313,7 @@ pub trait OmVariableReadable: GenericOmVariable {
     fn init_child_from_offset_size(
         &self,
         offset_size: OmOffsetSize,
-    ) -> Result<Self::ChildType, OmFilesRsError> {
+    ) -> Result<Self::ChildType, OmFilesError> {
         let child_variable = self
             .backend()
             .get_bytes(offset_size.offset, offset_size.size)?

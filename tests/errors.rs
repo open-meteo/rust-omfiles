@@ -2,7 +2,7 @@ use ndarray::ArrayD;
 use omfiles::backends::memory::InMemoryBackend;
 use omfiles::backends::mmapfile::MmapFile;
 use omfiles::core::compression::CompressionType;
-use omfiles::errors::OmFilesRsError;
+use omfiles::errors::OmFilesError;
 use omfiles::io::reader::OmFileReader;
 use omfiles::io::writer::OmFileWriter;
 use std::borrow::BorrowMut;
@@ -115,7 +115,7 @@ fn test_opening_not_an_om_file() {
 
     // Try to open the file as an OM file
     let result = OmFileReader::<MmapFile>::from_file(short_file);
-    assert!(matches!(result, Err(OmFilesRsError::FileTooSmall)));
+    assert!(matches!(result, Err(OmFilesError::FileTooSmall)));
     remove_file_if_exists(short_file);
 
     let longer_file = "not_an_om_file.txt";
@@ -127,10 +127,10 @@ fn test_opening_not_an_om_file() {
 
     // Try to open the file as an OM file
     let result = OmFileReader::<MmapFile>::from_file(longer_file);
-    assert!(matches!(result, Err(OmFilesRsError::NotAnOmFile)));
+    assert!(matches!(result, Err(OmFilesError::NotAnOmFile)));
     remove_file_if_exists(longer_file);
 }
-fn error_string<T>(result: Result<T, OmFilesRsError>) -> String {
+fn error_string<T>(result: Result<T, OmFilesError>) -> String {
     match result {
         Ok(_) => {
             assert!(false, "Expected error");

@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
-pub enum OmFilesRsError {
+pub enum OmFilesError {
     #[error("Cannot open file '{filename}': errno {errno}, error: {error}")]
     CannotOpenFile {
         filename: String,
