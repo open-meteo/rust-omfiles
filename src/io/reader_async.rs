@@ -13,7 +13,7 @@ use crate::io::variable_impl::{
     implement_array_variable_methods, implement_common_variable_methods,
     implement_scalar_variable_methods,
 };
-use crate::traits::OmFileReaderBackendAsync;
+use crate::traits::{GenericOmVariable, OmFileReaderBackendAsync};
 use async_executor::{Executor, Task};
 use async_lock::Semaphore;
 use ndarray::ArrayD;
@@ -51,9 +51,14 @@ pub struct OmFileReaderAsync<Backend> {
     variable: OmVariableContainer,
 }
 
+impl<Backend: OmFileReaderBackendAsync> GenericOmVariable for OmFileReaderAsync<Backend> {
+    fn variable(&self) -> &OmVariableContainer {
+        &self.variable
+    }
+}
+
 // implement utility methods for OmFileReaderAsync
-implement_common_variable_methods!(OmFileReaderAsync<Backend>);
-implement_scalar_variable_methods!(OmFileReaderAsync<Backend>);
+// implement_scalar_variable_methods!(OmFileReaderAsync<Backend>);
 
 impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsync<Backend> {
     /// Creates a new asynchronous reader for an Open-Meteo file.

@@ -3,18 +3,12 @@ use crate::core::data_types::OmFileArrayDataType;
 use crate::errors::OmFilesRsError;
 use crate::io::reader_utils::process_trailer;
 use crate::io::variable::OmVariableContainer;
-use crate::io::variable_impl::{
-    implement_array_variable_methods, implement_common_variable_methods,
-    implement_scalar_variable_methods,
+use crate::traits::{
+    ArrayOmVariable, GenericOmVariable, OmFileReaderBackend, OmVariableReadable, ScalarOmVariable,
 };
-use crate::io::writer::OmOffsetSize;
-use crate::traits::OmFileReaderBackend;
 use ndarray::ArrayD;
 use num_traits::Zero;
-use om_file_format_sys::{
-    OmHeaderType_t, om_header_size, om_header_type, om_trailer_size, om_variable_get_children,
-};
-use std::collections::HashMap;
+use om_file_format_sys::{OmHeaderType_t, om_header_size, om_header_type, om_trailer_size};
 use std::fs::File;
 use std::ops::Range;
 use std::os::raw::c_void;
@@ -27,9 +21,27 @@ pub struct OmFileReader<Backend> {
     pub variable: OmVariableContainer,
 }
 
-// implement utility methods for OmFileReader
-implement_common_variable_methods!(OmFileReader<Backend>);
-implement_scalar_variable_methods!(OmFileReader<Backend>);
+impl<Backend: OmFileReaderBackend> GenericOmVariable for OmFileReader<Backend> {
+    fn variable(&self) -> &OmVariableContainer {
+        &self.variable
+    }
+}
+
+impl<Backend: OmFileReaderBackend> OmVariableReadable for OmFileReader<Backend> {
+    type ChildType = OmFileReader<Backend>;
+    type Backend = Backend;
+
+    fn new_with_variable(&self, variable: OmVariableContainer) -> Self::ChildType {
+        Self {
+            backend: self.backend.clone(),
+            variable,
+        }
+    }
+
+    fn backend(&self) -> &Self::Backend {
+        &self.backend
+    }
+}
 
 impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
     pub fn new(backend: Arc<Backend>) -> Result<Self, OmFilesRsError> {
@@ -75,77 +87,13 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
         })
     }
 
-    /// Returns a HashMap mapping variable names to their offset and size
-    /// This function needs to traverse the entire variable tree, therefore
-    /// it is best to make sure that variable metadata is close to each other
-    /// at the end of the file (before the trailer). The caller could then
-    /// make sure that this part of the file is loaded/cached in memory
-    pub fn get_flat_variable_metadata(&self) -> HashMap<String, OmOffsetSize> {
-        let mut result = HashMap::new();
-        self.collect_variable_metadata(Vec::new(), &mut result);
-        result
-    }
-
-    /// Helper function that recursively collects variable metadata
-    fn collect_variable_metadata(
-        &self,
-        mut current_path: Vec<String>,
-        result: &mut HashMap<String, OmOffsetSize>,
-    ) {
-        // Add current variable's metadata if it has a name and offset_size
-        // TODO: This requires for names to be unique
-        if let Some(name) = self.get_name() {
-            if let Some(offset_size) = &self.variable.offset_size {
-                current_path.push(name.to_string());
-                // Create hierarchical key
-                let path_str = current_path
-                    .iter()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<_>>()
-                    .join("/");
-
-                result.insert(path_str, offset_size.clone());
-            }
+    pub fn expect_scalar(self) -> Result<OmFileReaderScalar<Backend>, OmFilesRsError> {
+        if self.data_type().is_array() {
+            return Err(OmFilesRsError::InvalidDataType);
         }
-
-        // Process children
-        let num_children = self.number_of_children();
-        for i in 0..num_children {
-            let child_path = current_path.clone();
-            if let Some(child) = self.get_child(i) {
-                child.collect_variable_metadata(child_path, result);
-            }
-        }
-    }
-
-    pub fn get_child(&self, index: u32) -> Option<Self> {
-        let mut offset = 0u64;
-        let mut size = 0u64;
-        if !unsafe {
-            om_variable_get_children(*self.variable.variable, index, 1, &mut offset, &mut size)
-        } {
-            return None;
-        }
-
-        let offset_size = OmOffsetSize::new(offset, size);
-        let child = self
-            .init_child_from_offset_size(offset_size)
-            .expect("Failed to init child");
-        Some(child)
-    }
-
-    pub fn init_child_from_offset_size(
-        &self,
-        offset_size: OmOffsetSize,
-    ) -> Result<Self, OmFilesRsError> {
-        let child_variable = self
-            .backend
-            .get_bytes(offset_size.offset, offset_size.size)?
-            .to_vec();
-
-        Ok(Self {
-            backend: self.backend.clone(),
-            variable: OmVariableContainer::new(child_variable, Some(offset_size)),
+        Ok(OmFileReaderScalar {
+            backend: self.backend,
+            variable: self.variable,
         })
     }
 
@@ -170,6 +118,35 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
     }
 }
 
+pub struct OmFileReaderScalar<Backend> {
+    backend: Arc<Backend>,
+    variable: OmVariableContainer,
+}
+
+impl<Backend: OmFileReaderBackend> GenericOmVariable for OmFileReaderScalar<Backend> {
+    fn variable(&self) -> &OmVariableContainer {
+        &self.variable
+    }
+}
+
+impl<Backend: OmFileReaderBackend> OmVariableReadable for OmFileReaderScalar<Backend> {
+    type ChildType = OmFileReader<Backend>;
+    type Backend = Backend;
+
+    fn new_with_variable(&self, variable: OmVariableContainer) -> Self::ChildType {
+        OmFileReader {
+            backend: self.backend.clone(),
+            variable,
+        }
+    }
+
+    fn backend(&self) -> &Self::Backend {
+        &self.backend
+    }
+}
+
+impl<Backend: OmFileReaderBackend> ScalarOmVariable for OmFileReaderScalar<Backend> {}
+
 pub struct OmFileReaderArray<Backend> {
     /// The backend that provides data via the get_bytes method
     pub backend: Arc<Backend>,
@@ -180,7 +157,37 @@ pub struct OmFileReaderArray<Backend> {
     io_size_merge: u64,
 }
 
-implement_array_variable_methods!(OmFileReaderArray<Backend>);
+impl<Backend: OmFileReaderBackend> GenericOmVariable for OmFileReaderArray<Backend> {
+    fn variable(&self) -> &OmVariableContainer {
+        &self.variable
+    }
+}
+
+impl<Backend: OmFileReaderBackend> OmVariableReadable for OmFileReaderArray<Backend> {
+    type ChildType = OmFileReader<Backend>;
+    type Backend = Backend;
+
+    fn new_with_variable(&self, variable: OmVariableContainer) -> Self::ChildType {
+        OmFileReader {
+            backend: self.backend.clone(),
+            variable,
+        }
+    }
+
+    fn backend(&self) -> &Self::Backend {
+        &self.backend
+    }
+}
+
+impl<Backend: OmFileReaderBackend> ArrayOmVariable for OmFileReaderArray<Backend> {
+    fn io_size_max(&self) -> u64 {
+        self.io_size_max
+    }
+
+    fn io_size_merge(&self) -> u64 {
+        self.io_size_merge
+    }
+}
 
 impl<Backend: OmFileReaderBackend> OmFileReaderArray<Backend> {
     /// Read a variable as an array of a dynamic data type.

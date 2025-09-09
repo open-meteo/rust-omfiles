@@ -17,7 +17,7 @@ use omfiles::{
         reader_async::OmFileReaderAsync,
         writer::{OmFileWriter, OmOffsetSize},
     },
-    traits::OmFileReaderBackend,
+    traits::{GenericOmVariable, OmFileReaderBackend, OmVariableReadable, ScalarOmVariable},
 };
 use smol_macros::test;
 use std::{
@@ -280,7 +280,7 @@ fn test_none_variable_as_group() -> Result<(), Box<dyn std::error::Error>> {
     let child = read.get_child(0).unwrap();
     assert_eq!(child.get_name().unwrap(), "attribute");
     assert_eq!(child.data_type(), DataType::Int32);
-    assert_eq!(child.read_scalar::<i32>().unwrap(), 42);
+    assert_eq!(child.expect_scalar()?.read_scalar::<i32>().unwrap(), 42);
 
     Ok(())
 }
@@ -708,11 +708,11 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
 
         assert_eq!(read.number_of_children(), 2);
 
-        let child = read.get_child(0).unwrap();
+        let child = read.get_child(0).unwrap().expect_scalar()?;
         assert_eq!(child.read_scalar::<i32>().unwrap(), 12323154i32);
         assert_eq!(child.get_name().unwrap(), "int32");
 
-        let child2 = read.get_child(1).unwrap();
+        let child2 = read.get_child(1).unwrap().expect_scalar()?;
         assert_eq!(child2.read_scalar::<f64>().unwrap(), 12323154f64);
         assert_eq!(child2.get_name().unwrap(), "double");
 
@@ -893,7 +893,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         // Verify the hierarchical structure
         let file_for_reading = File::open(file)?;
         let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let reader = OmFileReader::new(Arc::new(read_backend))?;
+        let reader = OmFileReader::new(Arc::new(read_backend))?.expect_array()?;
 
         let all_children_meta = reader.get_flat_variable_metadata();
         let expected_metadata = [
@@ -912,7 +912,9 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(all_children_meta, expected_metadata);
 
         // Check parent data
-        let parent = reader.expect_array()?.read::<f32>(&[0..3, 0..3])?;
+        // Check number of children at root level
+        assert_eq!(reader.number_of_children(), 5);
+        let parent = reader.read::<f32>(&[0..3, 0..3])?;
         let expected_parent = ArrayD::from_shape_vec(
             vec![3, 3],
             vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
@@ -920,50 +922,49 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap();
         assert_eq!(parent, expected_parent);
 
-        // // Check number of children at root level
-        // assert_eq!(reader.number_of_children(), 5);
+        // let reader = parent_reader.into_generic_reader();
 
-        // // Check child1 data and its subchild
-        // let child1 = reader.get_child(0).unwrap().expect_array()?;
-        // assert_eq!(child1.get_name().unwrap(), "child1");
-        // let child1_data = child1.read::<f32>(&[0..2, 0..2], None, None)?;
-        // let expected_child1 =
-        //     ArrayD::from_shape_vec(vec![2, 2], vec![10.0, 11.0, 12.0, 13.0]).unwrap();
-        // assert_eq!(child1_data, expected_child1);
+        // Check child1 data and its subchild
+        let child1 = reader.get_child(0).unwrap().expect_array()?;
+        assert_eq!(child1.get_name().unwrap(), "child1");
+        let child1_data = child1.read::<f32>(&[0..2, 0..2])?;
+        let expected_child1 =
+            ArrayD::from_shape_vec(vec![2, 2], vec![10.0, 11.0, 12.0, 13.0]).unwrap();
+        assert_eq!(child1_data, expected_child1);
 
-        // // Check child1's subchild
-        // assert_eq!(child1.number_of_children(), 1);
-        // let subchild = child1.get_child(0).unwrap().expect_array()?;
-        // assert_eq!(subchild.get_name().unwrap(), "subchild");
-        // let subchild_data = subchild.read::<f32>(&[0..4, 0..500], None, None)?;
-        // let expected_subchild = ArrayD::from_shape_vec(
-        //     vec![4, 500],
-        //     vec![(30..2030).map(|x| x as f32).collect::<Vec<f32>>()].concat(),
-        // )
-        // .unwrap();
-        // assert_eq!(subchild_data, expected_subchild);
+        // Check child1's subchild
+        assert_eq!(child1.number_of_children(), 1);
+        let subchild = child1.get_child(0).unwrap().expect_array()?;
+        assert_eq!(subchild.get_name().unwrap(), "subchild");
+        let subchild_data = subchild.read::<f32>(&[0..4, 0..500])?;
+        let expected_subchild = ArrayD::from_shape_vec(
+            vec![4, 500],
+            vec![(30..2030).map(|x| x as f32).collect::<Vec<f32>>()].concat(),
+        )
+        .unwrap();
+        assert_eq!(subchild_data, expected_subchild);
 
-        // // Check child2 data (no children)
-        // let child2 = reader.get_child(1).unwrap();
-        // assert_eq!(child2.get_name().unwrap(), "child2");
-        // assert_eq!(child2.number_of_children(), 0);
-        // let child2_data = child2.read::<f32>(&[0..2, 0..2], None, None)?;
-        // let expected_child2 =
-        //     ArrayD::from_shape_vec(vec![2, 2], vec![20.0, 21.0, 22.0, 23.0]).unwrap();
-        // assert_eq!(child2_data, expected_child2);
+        // Check child2 data (no children)
+        let child2 = reader.get_child(1).unwrap().expect_array()?;
+        assert_eq!(child2.get_name().unwrap(), "child2");
+        assert_eq!(child2.number_of_children(), 0);
+        let child2_data = child2.read::<f32>(&[0..2, 0..2])?;
+        let expected_child2 =
+            ArrayD::from_shape_vec(vec![2, 2], vec![20.0, 21.0, 22.0, 23.0]).unwrap();
+        assert_eq!(child2_data, expected_child2);
 
-        // // Check attributes
-        // let int32 = reader.get_child(2).unwrap();
-        // assert_eq!(int32.get_name().unwrap(), "int32");
-        // assert_eq!(int32.read_scalar::<i32>().unwrap(), 12323154i32);
+        // Check attributes
+        let int32 = reader.get_child(2).unwrap().expect_scalar()?;
+        assert_eq!(int32.get_name().unwrap(), "int32");
+        assert_eq!(int32.read_scalar::<i32>().unwrap(), 12323154i32);
 
-        // let double = reader.get_child(3).unwrap();
-        // assert_eq!(double.get_name().unwrap(), "double");
-        // assert_eq!(double.read_scalar::<f64>().unwrap(), 12323154f64);
+        let double = reader.get_child(3).unwrap().expect_scalar()?;
+        assert_eq!(double.get_name().unwrap(), "double");
+        assert_eq!(double.read_scalar::<f64>().unwrap(), 12323154f64);
 
-        // let string = reader.get_child(4).unwrap();
-        // assert_eq!(string.get_name().unwrap(), "string");
-        // assert_eq!(string.read_scalar::<String>().unwrap(), "hello");
+        let string = reader.get_child(4).unwrap().expect_scalar()?;
+        assert_eq!(string.get_name().unwrap(), "string");
+        assert_eq!(string.read_scalar::<String>().unwrap(), "hello");
     }
 
     remove_file_if_exists(file);
