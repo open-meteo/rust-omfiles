@@ -49,14 +49,11 @@ pub struct OmFileReaderAsync<Backend> {
     pub backend: Arc<Backend>,
     /// Container for variable metadata and raw data
     variable: OmVariableContainer,
-    /// Maximum number of concurrent data fetching operations
-    semaphore: Arc<Semaphore>,
 }
 
 // implement utility methods for OmFileReaderAsync
 implement_common_variable_methods!(OmFileReaderAsync<Backend>);
 implement_scalar_variable_methods!(OmFileReaderAsync<Backend>);
-implement_array_variable_methods!(OmFileReaderAsync<Backend>);
 
 impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsync<Backend> {
     /// Creates a new asynchronous reader for an Open-Meteo file.
@@ -90,7 +87,6 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
                     return Ok(Self {
                         backend,
                         variable: OmVariableContainer::new(variable_data, Some(offset_size)),
-                        semaphore: Arc::new(Semaphore::new(16)),
                     });
                 }
                 Err(OmFilesRsError::NotAnOmFile) => {
@@ -114,10 +110,46 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
         Ok(Self {
             backend,
             variable: OmVariableContainer::new(header_data.to_vec(), None),
-            semaphore: Arc::new(Semaphore::new(16)),
         })
     }
 
+    pub fn expect_array(self) -> Result<OmFileReaderAsyncArray<Backend>, OmFilesRsError> {
+        self.expect_array_with_io_sizes(65536, 512)
+    }
+
+    pub fn expect_array_with_io_sizes(
+        self,
+        io_size_max: u64,
+        io_size_merge: u64,
+    ) -> Result<OmFileReaderAsyncArray<Backend>, OmFilesRsError> {
+        if !self.data_type().is_array() {
+            return Err(OmFilesRsError::InvalidDataType);
+        }
+        Ok(OmFileReaderAsyncArray {
+            backend: self.backend,
+            variable: self.variable,
+            semaphore: Arc::new(Semaphore::new(16)),
+            io_size_max,
+            io_size_merge,
+        })
+    }
+}
+
+pub struct OmFileReaderAsyncArray<Backend> {
+    /// The backend that provides asynchronous data access
+    pub backend: Arc<Backend>,
+    /// Container for variable metadata and raw data
+    variable: OmVariableContainer,
+    /// Maximum number of concurrent data fetching operations
+    semaphore: Arc<Semaphore>,
+
+    io_size_max: u64,
+    io_size_merge: u64,
+}
+
+implement_array_variable_methods!(OmFileReaderAsyncArray<Backend>);
+
+impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyncArray<Backend> {
     /// Sets the maximum number of concurrent fetch operations.
     /// # Parameters
     /// - `max_concurrency`: The maximum number of concurrent operations (must be > 0)
@@ -143,23 +175,14 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
     pub async fn read<T: OmFileArrayDataType + Clone + Zero + Send + Sync + 'static>(
         &self,
         dim_read: &[Range<u64>],
-        io_size_max: Option<u64>,
-        io_size_merge: Option<u64>,
     ) -> Result<ArrayD<T>, OmFilesRsError> {
         let out_dims: Vec<u64> = dim_read.iter().map(|r| r.end - r.start).collect();
         let out_dims_usize = out_dims.iter().map(|&x| x as usize).collect::<Vec<_>>();
 
         let mut out = ArrayD::<T>::zeros(out_dims_usize);
 
-        self.read_into::<T>(
-            &mut out,
-            dim_read,
-            &vec![0; dim_read.len()],
-            &out_dims,
-            io_size_max,
-            io_size_merge,
-        )
-        .await?;
+        self.read_into::<T>(&mut out, dim_read, &vec![0; dim_read.len()], &out_dims)
+            .await?;
 
         Ok(out)
     }
@@ -190,16 +213,9 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
         dim_read: &[Range<u64>],
         into_cube_offset: &[u64],
         into_cube_dimension: &[u64],
-        io_size_max: Option<u64>,
-        io_size_merge: Option<u64>,
     ) -> Result<(), OmFilesRsError> {
-        let decoder = self.prepare_read_parameters::<T>(
-            dim_read,
-            into_cube_offset,
-            into_cube_dimension,
-            io_size_max,
-            io_size_merge,
-        )?;
+        let decoder =
+            self.prepare_read_parameters::<T>(dim_read, into_cube_offset, into_cube_dimension)?;
 
         // Process all index blocks
         let mut index_read = decoder.new_index_read();

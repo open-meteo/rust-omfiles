@@ -30,7 +30,6 @@ pub struct OmFileReader<Backend> {
 // implement utility methods for OmFileReader
 implement_common_variable_methods!(OmFileReader<Backend>);
 implement_scalar_variable_methods!(OmFileReader<Backend>);
-implement_array_variable_methods!(OmFileReader<Backend>);
 
 impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
     pub fn new(backend: Arc<Backend>) -> Result<Self, OmFilesRsError> {
@@ -150,6 +149,40 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
         })
     }
 
+    pub fn expect_array(self) -> Result<OmFileReaderArray<Backend>, OmFilesRsError> {
+        self.expect_array_with_io_sizes(65536, 512)
+    }
+
+    pub fn expect_array_with_io_sizes(
+        self,
+        io_size_max: u64,
+        io_size_merge: u64,
+    ) -> Result<OmFileReaderArray<Backend>, OmFilesRsError> {
+        if !self.data_type().is_array() {
+            return Err(OmFilesRsError::InvalidDataType);
+        }
+        Ok(OmFileReaderArray {
+            backend: self.backend,
+            variable: self.variable,
+            io_size_max,
+            io_size_merge,
+        })
+    }
+}
+
+pub struct OmFileReaderArray<Backend> {
+    /// The backend that provides data via the get_bytes method
+    pub backend: Arc<Backend>,
+    /// The variable containing metadata and access methods
+    pub variable: OmVariableContainer,
+
+    io_size_max: u64,
+    io_size_merge: u64,
+}
+
+implement_array_variable_methods!(OmFileReaderArray<Backend>);
+
+impl<Backend: OmFileReaderBackend> OmFileReaderArray<Backend> {
     /// Read a variable as an array of a dynamic data type.
     pub fn read_into<T: OmFileArrayDataType>(
         &self,
@@ -157,16 +190,9 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
         dim_read: &[Range<u64>],
         into_cube_offset: &[u64],
         into_cube_dimension: &[u64],
-        io_size_max: Option<u64>,
-        io_size_merge: Option<u64>,
     ) -> Result<(), OmFilesRsError> {
-        let decoder = self.prepare_read_parameters::<T>(
-            dim_read,
-            into_cube_offset,
-            into_cube_dimension,
-            io_size_max,
-            io_size_merge,
-        )?;
+        let decoder =
+            self.prepare_read_parameters::<T>(dim_read, into_cube_offset, into_cube_dimension)?;
 
         let mut chunk_buffer = Vec::<u8>::with_capacity(decoder.buffer_size() as usize);
         self.backend
@@ -178,22 +204,13 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
     pub fn read<T: OmFileArrayDataType + Clone + Zero>(
         &self,
         dim_read: &[Range<u64>],
-        io_size_max: Option<u64>,
-        io_size_merge: Option<u64>,
     ) -> Result<ArrayD<T>, OmFilesRsError> {
         let out_dims: Vec<u64> = dim_read.iter().map(|r| r.end - r.start).collect();
         let out_dims_usize = out_dims.iter().map(|&x| x as usize).collect::<Vec<_>>();
 
         let mut out = ArrayD::<T>::zeros(out_dims_usize);
 
-        self.read_into::<T>(
-            &mut out,
-            dim_read,
-            &vec![0; dim_read.len()],
-            &out_dims,
-            io_size_max,
-            io_size_merge,
-        )?;
+        self.read_into::<T>(&mut out, dim_read, &vec![0; dim_read.len()], &out_dims)?;
 
         Ok(out)
     }

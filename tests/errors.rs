@@ -102,7 +102,8 @@ fn test_mismatching_cube_dimension_length_for_read() {
     }
 
     let reader = OmFileReader::new(Arc::new(backend)).unwrap();
-    let result = reader.read::<i32>(&[0..10], None, None);
+    let reader = reader.expect_array().unwrap();
+    let result = reader.read::<i32>(&[0..10]);
 
     assert_eq!(error_string(result), "Mismatching cube dimension length");
 }

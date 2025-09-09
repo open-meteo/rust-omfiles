@@ -1,8 +1,8 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use ndarray::{Array, ArrayViewD};
 use omfiles::{
-    backend::{
-        backends::InMemoryBackend,
+    backends::{
+        memory::InMemoryBackend,
         mmapfile::{MmapFile, Mode},
     },
     core::compression::CompressionType,
@@ -114,7 +114,10 @@ pub fn benchmark_read(c: &mut Criterion) {
     let file = "benchmark.om";
     let file_for_reading = File::open(file).unwrap();
     let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly).unwrap();
-    let reader = OmFileReader::new(Arc::new(read_backend)).unwrap();
+    let reader = OmFileReader::new(Arc::new(read_backend))
+        .unwrap()
+        .expect_array()
+        .unwrap();
 
     let dim0_read_size = 256;
 
@@ -123,11 +126,7 @@ pub fn benchmark_read(c: &mut Criterion) {
             let random_x: u64 = rand::rng().random_range(0..DIM0_SIZE - dim0_read_size);
             let random_y: u64 = rand::rng().random_range(0..DIM1_SIZE);
             let values = reader
-                .read::<f32>(
-                    &[random_x..random_x + dim0_read_size, random_y..random_y + 1],
-                    None,
-                    None,
-                )
+                .read::<f32>(&[random_x..random_x + dim0_read_size, random_y..random_y + 1])
                 .expect("Could not read range");
 
             assert_eq!(values.len(), dim0_read_size as usize);

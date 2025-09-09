@@ -119,17 +119,7 @@ macro_rules! implement_array_variable_methods {
                 dim_read: &[Range<u64>],
                 into_cube_offset: &[u64],
                 into_cube_dimension: &[u64],
-                io_size_max: Option<u64>,
-                io_size_merge: Option<u64>,
             ) -> Result<crate::io::wrapped_decoder::WrappedDecoder, OmFilesRsError> {
-                let io_size_max = io_size_max.unwrap_or(65536);
-                let io_size_merge = io_size_merge.unwrap_or(512);
-
-                // Verify data type
-                if T::DATA_TYPE_ARRAY != self.data_type() {
-                    return Err(OmFilesRsError::InvalidDataType);
-                }
-
                 let n_dimensions_read = dim_read.len();
                 let n_dims = self.get_dimensions().len();
 
@@ -153,8 +143,8 @@ macro_rules! implement_array_variable_methods {
                     read_count,
                     into_cube_offset,
                     into_cube_dimension,
-                    io_size_merge,
-                    io_size_max,
+                    self.io_size_merge,
+                    self.io_size_max,
                 )?;
 
                 Ok(decoder)
