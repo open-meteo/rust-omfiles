@@ -4,7 +4,7 @@ use crate::errors::OmFilesError;
 use crate::io::reader_utils::process_trailer;
 use crate::io::variable::OmVariableContainer;
 use crate::traits::{
-    ArrayOmVariable, ArrayOmVariableImpl, OmFileReadable, OmFileReaderBackend, OmFileVariable,
+    ArrayOmVariable, ArrayOmVariableImpl, OmFileReadableImpl, OmFileReaderBackend, OmFileVariable,
     OmFileVariableImpl,
 };
 use ndarray::ArrayD;
@@ -19,7 +19,7 @@ pub struct OmFileReader<Backend> {
     /// The backend that provides data via the get_bytes method
     pub backend: Arc<Backend>,
     /// The variable containing metadata and access methods
-    pub variable: OmVariableContainer,
+    variable: OmVariableContainer,
 }
 
 impl<Backend: OmFileReaderBackend> OmFileVariableImpl for OmFileReader<Backend> {
@@ -28,18 +28,15 @@ impl<Backend: OmFileReaderBackend> OmFileVariableImpl for OmFileReader<Backend> 
     }
 }
 
-impl<Backend: OmFileReaderBackend> OmFileReadable for OmFileReader<Backend> {
-    type ChildType = OmFileReader<Backend>;
-    type Backend = Backend;
-
-    fn new_with_variable(&self, variable: OmVariableContainer) -> Self::ChildType {
+impl<Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileReader<Backend> {
+    fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReader<Backend> {
         Self {
             backend: self.backend.clone(),
             variable,
         }
     }
 
-    fn backend(&self) -> &Self::Backend {
+    fn backend(&self) -> &Backend {
         &self.backend
     }
 }
@@ -130,18 +127,15 @@ impl<Backend: OmFileReaderBackend> OmFileVariableImpl for OmFileScalar<Backend> 
     }
 }
 
-impl<Backend: OmFileReaderBackend> OmFileReadable for OmFileScalar<Backend> {
-    type ChildType = OmFileReader<Backend>;
-    type Backend = Backend;
-
-    fn new_with_variable(&self, variable: OmVariableContainer) -> Self::ChildType {
+impl<Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileScalar<Backend> {
+    fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReader<Backend> {
         OmFileReader {
             backend: self.backend.clone(),
             variable,
         }
     }
 
-    fn backend(&self) -> &Self::Backend {
+    fn backend(&self) -> &Backend {
         &self.backend
     }
 }
@@ -150,7 +144,7 @@ pub struct OmFileArray<Backend> {
     /// The backend that provides data via the get_bytes method
     pub backend: Arc<Backend>,
     /// The variable containing metadata and access methods
-    pub variable: OmVariableContainer,
+    variable: OmVariableContainer,
 
     io_size_max: u64,
     io_size_merge: u64,
@@ -162,18 +156,15 @@ impl<Backend: OmFileReaderBackend> OmFileVariableImpl for OmFileArray<Backend> {
     }
 }
 
-impl<Backend: OmFileReaderBackend> OmFileReadable for OmFileArray<Backend> {
-    type ChildType = OmFileReader<Backend>;
-    type Backend = Backend;
-
-    fn new_with_variable(&self, variable: OmVariableContainer) -> Self::ChildType {
+impl<Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileArray<Backend> {
+    fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReader<Backend> {
         OmFileReader {
             backend: self.backend.clone(),
             variable,
         }
     }
 
-    fn backend(&self) -> &Self::Backend {
+    fn backend(&self) -> &Backend {
         &self.backend
     }
 }
