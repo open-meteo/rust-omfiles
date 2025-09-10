@@ -119,7 +119,7 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
     }
 
     pub fn expect_scalar(self) -> Result<OmFileScalar<Backend>, OmFilesError> {
-        if self.data_type().is_array() {
+        if !self.data_type().is_scalar() {
             return Err(OmFilesError::InvalidDataType);
         }
         Ok(OmFileScalar {

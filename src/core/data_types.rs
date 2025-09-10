@@ -32,10 +32,11 @@ pub enum DataType {
 }
 
 impl DataType {
-    pub fn to_c(&self) -> OmDataType_t {
+    pub(crate) fn to_c(&self) -> OmDataType_t {
         unsafe { std::mem::transmute(*self as u32) }
     }
 
+    /// Check if the data type is an array type.
     pub fn is_array(&self) -> bool {
         match self {
             DataType::Int8Array
@@ -47,8 +48,33 @@ impl DataType {
             | DataType::Int64Array
             | DataType::Uint64Array
             | DataType::FloatArray
-            | DataType::DoubleArray
-            | DataType::StringArray => true,
+            | DataType::DoubleArray => true,
+            _ => false,
+        }
+    }
+
+    /// Check if the data type is a scalar type.
+    pub fn is_scalar(&self) -> bool {
+        match self {
+            DataType::Int8
+            | DataType::Uint8
+            | DataType::Int16
+            | DataType::Uint16
+            | DataType::Int32
+            | DataType::Uint32
+            | DataType::Int64
+            | DataType::Uint64
+            | DataType::Float
+            | DataType::Double
+            | DataType::String => true,
+            _ => false,
+        }
+    }
+
+    /// Check if the data type is a group.
+    pub fn is_group(&self) -> bool {
+        match self {
+            DataType::None => true,
             _ => false,
         }
     }

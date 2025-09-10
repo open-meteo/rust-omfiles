@@ -423,3 +423,230 @@ pub struct OmFileWriterArrayFinalized {
     pub lut_size: u64,
     pub lut_offset: u64,
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{ptr, slice, sync::Arc};
+
+    use om_file_format_sys::{
+        om_variable_get_children_count, om_variable_get_scalar, om_variable_get_type,
+        om_variable_init,
+    };
+
+    use crate::{
+        backends::memory::InMemoryBackend,
+        io::reader::OmFileReader,
+        traits::{OmFileReadable, OmFileVariable, ScalarOmVariable},
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_variable() {
+        let name = "name";
+
+        // Calculate size needed for scalar variable
+        let size_scalar = unsafe {
+            om_variable_write_scalar_size(name.len() as u16, 0, DataType::Int8.to_c(), 0)
+        };
+
+        assert_eq!(size_scalar, 13);
+
+        // Create buffer for the variable
+        let mut data = vec![255u8; size_scalar];
+        let value: u8 = 177;
+
+        // Write the scalar variable
+        unsafe {
+            om_variable_write_scalar(
+                data.as_mut_ptr() as *mut std::os::raw::c_void,
+                name.len() as u16,
+                0,
+                ptr::null(),
+                ptr::null(),
+                name.as_ptr() as *const ::std::os::raw::c_char,
+                DataType::Int8.to_c(),
+                &value as *const u8 as *const std::os::raw::c_void,
+                0,
+            );
+        }
+
+        assert_eq!(data, [1, 4, 4, 0, 0, 0, 0, 0, 177, 110, 97, 109, 101]);
+
+        // Initialize a variable from the data
+        let om_variable = unsafe { om_variable_init(data.as_ptr() as *const c_void) };
+
+        // Verify the variable type and children count
+        unsafe {
+            assert_eq!(om_variable_get_type(om_variable), DataType::Int8.to_c());
+            assert_eq!(om_variable_get_children_count(om_variable), 0);
+        }
+
+        // Get the scalar value
+        let mut ptr: *mut std::os::raw::c_void = ptr::null_mut();
+        let mut size: u64 = 0;
+
+        let error = unsafe { om_variable_get_scalar(om_variable, &mut ptr, &mut size) };
+
+        // Verify successful retrieval and the value
+        assert_eq!(error, OmError_t::ERROR_OK);
+        assert!(!ptr.is_null());
+
+        let result_value = unsafe { *(ptr as *const u8) };
+        assert_eq!(result_value, value);
+    }
+
+    #[test]
+    fn test_variable_string() {
+        let name = "name";
+        let value = "Hello, World!";
+
+        // Calculate size for string scalar
+        let size_scalar = unsafe {
+            om_variable_write_scalar_size(
+                name.len() as u16,
+                0,
+                DataType::String.to_c(),
+                value.len() as u64,
+            )
+        };
+
+        assert_eq!(size_scalar, 33);
+
+        // Create buffer for the variable
+        let mut data = vec![255u8; size_scalar];
+
+        // Write the string scalar
+        unsafe {
+            om_variable_write_scalar(
+                data.as_mut_ptr() as *mut std::os::raw::c_void,
+                name.len() as u16,
+                0,
+                ptr::null(),
+                ptr::null(),
+                name.as_ptr() as *const ::std::os::raw::c_char,
+                DataType::String.to_c(),
+                value.as_ptr() as *const std::os::raw::c_void,
+                value.len(),
+            );
+        }
+
+        // Verify the written data
+        let expected = [
+            11, // OmDataType_t: 11 = DATA_TYPE_STRING
+            4,  // OmCompression_t: 4 = COMPRESSION_NONE
+            4, 0, // Size of name
+            0, 0, 0, 0, // Children count
+            13, 0, 0, 0, 0, 0, 0, 0, // stringSize
+            72, 101, 108, 108, 111, 44, 32, 87, 111, 114, 108, 100, 33, // "Hello, World!"
+            110, 97, 109, 101, // "name"
+        ];
+
+        assert_eq!(data, expected);
+
+        // Initialize a variable from the data
+        let om_variable = unsafe { om_variable_init(data.as_ptr() as *const c_void) };
+
+        // Verify the variable type and children count
+        unsafe {
+            assert_eq!(om_variable_get_type(om_variable), DataType::String.to_c());
+            assert_eq!(om_variable_get_children_count(om_variable), 0);
+        }
+
+        // Get the scalar value
+        let mut ptr: *mut std::os::raw::c_void = ptr::null_mut();
+        let mut size: u64 = 0;
+
+        let error = unsafe { om_variable_get_scalar(om_variable, &mut ptr, &mut size) };
+
+        // Verify successful retrieval and the value
+        assert_eq!(error, OmError_t::ERROR_OK);
+        assert!(!ptr.is_null());
+
+        // Convert the raw bytes back to a string
+        let string_bytes = unsafe { slice::from_raw_parts(ptr as *const u8, size as usize) };
+        let result_string = std::str::from_utf8(string_bytes).unwrap();
+
+        assert_eq!(result_string, value);
+    }
+
+    #[test]
+    fn test_variable_none() {
+        let name = "name";
+
+        // Calculate size for None type scalar
+        let size_scalar = unsafe {
+            om_variable_write_scalar_size(name.len() as u16, 0, DataType::None.to_c(), 0)
+        };
+
+        assert_eq!(size_scalar, 12); // 8 (header) + 4 (name length) + 0 (no value)
+
+        // Create buffer for the variable
+        let mut data = vec![255u8; size_scalar];
+
+        // Write the non-existing value -> This is essentially creating a Group
+        unsafe {
+            om_variable_write_scalar(
+                data.as_mut_ptr() as *mut std::os::raw::c_void,
+                name.len() as u16,
+                0,
+                ptr::null(),
+                ptr::null(),
+                name.as_ptr() as *const ::std::os::raw::c_char,
+                DataType::None.to_c(),
+                ptr::null(),
+                0,
+            );
+        }
+
+        // Verify the written data
+        assert_eq!(data, [0, 4, 4, 0, 0, 0, 0, 0, 110, 97, 109, 101]);
+
+        // Initialize a variable from the data
+        let om_variable = unsafe { om_variable_init(data.as_ptr() as *const c_void) };
+
+        // Verify the variable type and children count
+        unsafe {
+            assert_eq!(om_variable_get_type(om_variable), DataType::None.to_c());
+            assert_eq!(om_variable_get_children_count(om_variable), 0);
+        }
+
+        // Try to get scalar value from None type (should fail)
+        let mut ptr: *mut std::os::raw::c_void = ptr::null_mut();
+        let mut size: u64 = 0;
+
+        let error = unsafe { om_variable_get_scalar(om_variable, &mut ptr, &mut size) };
+
+        // Verify that retrieval fails with the expected error
+        assert_eq!(error, OmError_t::ERROR_INVALID_DATA_TYPE);
+    }
+
+    #[test]
+    fn test_none_variable_as_group() -> Result<(), Box<dyn std::error::Error>> {
+        let mut in_memory_backend = InMemoryBackend::new(vec![]);
+        let mut file_writer = OmFileWriter::new(in_memory_backend.borrow_mut(), 8);
+
+        // Write a regular variable
+        let int_var = file_writer.write_scalar(42i32, "attribute", &[])?;
+        // Write a None type to indicate some type of group
+        let group_var = file_writer.write_none("group", &[int_var])?;
+
+        file_writer.write_trailer(group_var)?;
+        drop(file_writer);
+
+        // Read the file
+        let read = OmFileReader::new(Arc::new(in_memory_backend))?;
+
+        // Verify the group variable
+        assert_eq!(read.get_name().unwrap(), "group");
+        assert_eq!(read.data_type(), DataType::None);
+
+        // Get the child variable, which is an attribute
+        let child = read.get_child(0).unwrap();
+        assert_eq!(child.get_name().unwrap(), "attribute");
+        assert_eq!(child.data_type(), DataType::Int32);
+        assert_eq!(child.expect_scalar()?.read_scalar::<i32>().unwrap(), 42);
+
+        Ok(())
+    }
+}
