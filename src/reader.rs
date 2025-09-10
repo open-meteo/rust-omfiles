@@ -85,22 +85,22 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
         })
     }
 
-    pub fn expect_scalar(self) -> Result<OmFileScalar<Backend>, OmFilesError> {
+    pub fn expect_scalar(&self) -> Result<OmFileScalar<Backend>, OmFilesError> {
         if !self.data_type().is_scalar() {
             return Err(OmFilesError::InvalidDataType);
         }
         Ok(OmFileScalar {
-            backend: self.backend,
-            variable: self.variable,
+            backend: &self.backend,
+            variable: &self.variable,
         })
     }
 
-    pub fn expect_array(self) -> Result<OmFileArray<Backend>, OmFilesError> {
+    pub fn expect_array(&self) -> Result<OmFileArray<Backend>, OmFilesError> {
         self.expect_array_with_io_sizes(65536, 512)
     }
 
     pub fn expect_array_with_io_sizes(
-        self,
+        &self,
         io_size_max: u64,
         io_size_merge: u64,
     ) -> Result<OmFileArray<Backend>, OmFilesError> {
@@ -108,28 +108,28 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
             return Err(OmFilesError::InvalidDataType);
         }
         Ok(OmFileArray {
-            backend: self.backend,
-            variable: self.variable,
+            backend: &self.backend,
+            variable: &self.variable,
             io_size_max,
             io_size_merge,
         })
     }
 }
 
-pub struct OmFileScalar<Backend> {
-    pub(crate) backend: Arc<Backend>,
-    pub(crate) variable: OmVariableContainer,
+pub struct OmFileScalar<'a, Backend> {
+    pub(crate) backend: &'a Arc<Backend>,
+    pub(crate) variable: &'a OmVariableContainer,
 }
 
-impl<Backend: OmFileReaderBackend> OmFileVariableImpl for OmFileScalar<Backend> {
+impl<'a, Backend: OmFileReaderBackend> OmFileVariableImpl for OmFileScalar<'a, Backend> {
     fn variable(&self) -> &OmVariableContainer {
-        &self.variable
+        self.variable
     }
 }
 
-impl<Backend: OmFileReaderBackend> OmScalarVariableImpl for OmFileScalar<Backend> {}
+impl<'a, Backend: OmFileReaderBackend> OmScalarVariableImpl for OmFileScalar<'a, Backend> {}
 
-impl<Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileScalar<Backend> {
+impl<'a, Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileScalar<'a, Backend> {
     fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReader<Backend> {
         OmFileReader {
             backend: self.backend.clone(),
@@ -142,23 +142,23 @@ impl<Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileScalar<
     }
 }
 
-pub struct OmFileArray<Backend> {
+pub struct OmFileArray<'a, Backend> {
     /// The backend that provides data via the get_bytes method
-    pub backend: Arc<Backend>,
+    pub backend: &'a Arc<Backend>,
     /// The variable containing metadata and access methods
-    variable: OmVariableContainer,
+    variable: &'a OmVariableContainer,
 
     io_size_max: u64,
     io_size_merge: u64,
 }
 
-impl<Backend: OmFileReaderBackend> OmFileVariableImpl for OmFileArray<Backend> {
+impl<'a, Backend: OmFileReaderBackend> OmFileVariableImpl for OmFileArray<'a, Backend> {
     fn variable(&self) -> &OmVariableContainer {
-        &self.variable
+        self.variable
     }
 }
 
-impl<Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileArray<Backend> {
+impl<'a, Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileArray<'a, Backend> {
     fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReader<Backend> {
         OmFileReader {
             backend: self.backend.clone(),
@@ -167,11 +167,11 @@ impl<Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileArray<B
     }
 
     fn backend(&self) -> &Backend {
-        &self.backend
+        self.backend
     }
 }
 
-impl<Backend: OmFileReaderBackend> OmArrayVariableImpl for OmFileArray<Backend> {
+impl<'a, Backend: OmFileReaderBackend> OmArrayVariableImpl for OmFileArray<'a, Backend> {
     fn io_size_max(&self) -> u64 {
         self.io_size_max
     }
@@ -181,7 +181,7 @@ impl<Backend: OmFileReaderBackend> OmArrayVariableImpl for OmFileArray<Backend> 
     }
 }
 
-impl<Backend: OmFileReaderBackend> OmFileArray<Backend> {
+impl<'a, Backend: OmFileReaderBackend> OmFileArray<'a, Backend> {
     /// Read a variable as an array of a dynamic data type.
     pub fn read_into<T: OmFileArrayDataType>(
         &self,

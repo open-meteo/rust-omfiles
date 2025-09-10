@@ -94,8 +94,10 @@ fn test_in_memory_int_compression() -> Result<(), Box<dyn std::error::Error>> {
     drop(file_writer); // drop file_writer to release mutable borrow
 
     assert_eq!(in_memory_backend.count(), 136);
-    let read = OmFileReader::new(Arc::new(in_memory_backend))?.expect_array()?;
-    let uncompressed = read.read::<f32>(&[0u64..1, 0..data.len() as u64])?;
+    let read = OmFileReader::new(Arc::new(in_memory_backend))?;
+    let uncompressed = read
+        .expect_array()?
+        .read::<f32>(&[0u64..1, 0..data.len() as u64])?;
 
     assert_eq!(&must_equal, &uncompressed);
 
@@ -127,8 +129,10 @@ fn test_in_memory_f32_compression() -> Result<(), Box<dyn std::error::Error>> {
     drop(file_writer); // drop file_writer to release mutable borrow
 
     assert_eq!(in_memory_backend.count(), 160);
-    let read = OmFileReader::new(Arc::new(in_memory_backend))?.expect_array()?;
-    let uncompressed = read.read::<f32>(&[0u64..1, 0..data.len() as u64])?;
+    let read = OmFileReader::new(Arc::new(in_memory_backend))?;
+    let uncompressed = read
+        .expect_array()?
+        .read::<f32>(&[0u64..1, 0..data.len() as u64])?;
 
     assert_eq!(&must_equal, &uncompressed);
 
@@ -196,7 +200,8 @@ fn test_write_large() -> Result<(), Box<dyn std::error::Error>> {
     {
         let file_for_reading = File::open(file)?;
         let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let read = OmFileReader::new(Arc::new(read_backend))?.expect_array()?;
+        let read = OmFileReader::new(Arc::new(read_backend))?;
+        let read = read.expect_array()?;
 
         let a1 = read.read::<f32>(&[50..51, 20..21, 1..2])?;
         assert_eq!(a1.as_slice().unwrap(), &vec![201.0]);
@@ -278,7 +283,8 @@ fn test_write_chunks() -> Result<(), Box<dyn std::error::Error>> {
 
         let backend = Arc::new(read_backend);
 
-        let read = OmFileReader::new(backend.clone())?.expect_array()?;
+        let read = OmFileReader::new(backend.clone())?;
+        let read = read.expect_array()?;
 
         let a = read.read::<f32>(&[0..5, 0..5])?;
         let expected = ArrayD::from_shape_vec(
@@ -418,7 +424,8 @@ fn test_offset_write() -> Result<(), Box<dyn std::error::Error>> {
         // Read the file
         let file_for_reading = File::open(file)?;
         let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let read = OmFileReader::new(Arc::new(read_backend))?.expect_array()?;
+        let read = OmFileReader::new(Arc::new(read_backend))?;
+        let read = read.expect_array()?;
 
         // Read the data
         let a = read.read::<f32>(&[0..5, 0..5])?;
@@ -492,11 +499,13 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
 
         assert_eq!(read.number_of_children(), 2);
 
-        let child = read.get_child(0).unwrap().expect_scalar()?;
+        let child = read.get_child(0).unwrap();
+        let child = child.expect_scalar()?;
         assert_eq!(child.read_scalar::<i32>().unwrap(), 12323154i32);
         assert_eq!(child.get_name().unwrap(), "int32");
 
-        let child2 = read.get_child(1).unwrap().expect_scalar()?;
+        let child2 = read.get_child(1).unwrap();
+        let child2 = child2.expect_scalar()?;
         assert_eq!(child2.read_scalar::<f64>().unwrap(), 12323154f64);
         assert_eq!(child2.get_name().unwrap(), "double");
 
@@ -677,7 +686,8 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         // Verify the hierarchical structure
         let file_for_reading = File::open(file)?;
         let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let reader = OmFileReader::new(Arc::new(read_backend))?.expect_array()?;
+        let reader = OmFileReader::new(Arc::new(read_backend))?;
+        let reader = reader.expect_array()?;
 
         let all_children_meta = reader.get_flat_variable_metadata();
         let expected_metadata = [
@@ -709,18 +719,18 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         // let reader = parent_reader.into_generic_reader();
 
         // Check child1 data and its subchild
-        let child1 = reader.get_child(0).unwrap().expect_array()?;
+        let child1 = reader.get_child(0).unwrap();
         assert_eq!(child1.get_name().unwrap(), "child1");
-        let child1_data = child1.read::<f32>(&[0..2, 0..2])?;
+        let child1_data = child1.expect_array()?.read::<f32>(&[0..2, 0..2])?;
         let expected_child1 =
             ArrayD::from_shape_vec(vec![2, 2], vec![10.0, 11.0, 12.0, 13.0]).unwrap();
         assert_eq!(child1_data, expected_child1);
 
         // Check child1's subchild
         assert_eq!(child1.number_of_children(), 1);
-        let subchild = child1.get_child(0).unwrap().expect_array()?;
+        let subchild = child1.get_child(0).unwrap();
         assert_eq!(subchild.get_name().unwrap(), "subchild");
-        let subchild_data = subchild.read::<f32>(&[0..4, 0..500])?;
+        let subchild_data = subchild.expect_array()?.read::<f32>(&[0..4, 0..500])?;
         let expected_subchild = ArrayD::from_shape_vec(
             vec![4, 500],
             vec![(30..2030).map(|x| x as f32).collect::<Vec<f32>>()].concat(),
@@ -729,26 +739,35 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(subchild_data, expected_subchild);
 
         // Check child2 data (no children)
-        let child2 = reader.get_child(1).unwrap().expect_array()?;
+        let child2 = reader.get_child(1).unwrap();
         assert_eq!(child2.get_name().unwrap(), "child2");
         assert_eq!(child2.number_of_children(), 0);
-        let child2_data = child2.read::<f32>(&[0..2, 0..2])?;
+        let child2_data = child2.expect_array()?.read::<f32>(&[0..2, 0..2])?;
         let expected_child2 =
             ArrayD::from_shape_vec(vec![2, 2], vec![20.0, 21.0, 22.0, 23.0]).unwrap();
         assert_eq!(child2_data, expected_child2);
 
         // Check attributes
-        let int32 = reader.get_child(2).unwrap().expect_scalar()?;
+        let int32 = reader.get_child(2).unwrap();
         assert_eq!(int32.get_name().unwrap(), "int32");
-        assert_eq!(int32.read_scalar::<i32>().unwrap(), 12323154i32);
+        assert_eq!(
+            int32.expect_scalar()?.read_scalar::<i32>().unwrap(),
+            12323154i32
+        );
 
-        let double = reader.get_child(3).unwrap().expect_scalar()?;
+        let double = reader.get_child(3).unwrap();
         assert_eq!(double.get_name().unwrap(), "double");
-        assert_eq!(double.read_scalar::<f64>().unwrap(), 12323154f64);
+        assert_eq!(
+            double.expect_scalar()?.read_scalar::<f64>().unwrap(),
+            12323154f64
+        );
 
-        let string = reader.get_child(4).unwrap().expect_scalar()?;
+        let string = reader.get_child(4).unwrap();
         assert_eq!(string.get_name().unwrap(), "string");
-        assert_eq!(string.read_scalar::<String>().unwrap(), "hello");
+        assert_eq!(
+            string.expect_scalar()?.read_scalar::<String>().unwrap(),
+            "hello"
+        );
     }
 
     remove_file_if_exists(file);
@@ -795,7 +814,8 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
         let file_for_reading = File::open(file)?;
         let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
         let backend = Arc::new(read_backend);
-        let read = OmFileReader::new(backend.clone())?.expect_array()?;
+        let read = OmFileReader::new(backend.clone())?;
+        let read = read.expect_array()?;
 
         // Rest of test remains the same but using read.read::<f32>() instead of read_var.read()
         let a = read.read::<f32>(&[0..5, 0..5])?;
@@ -999,11 +1019,9 @@ fn test_write_v3_max_io_limit() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
-        // Open the file for reading
-        let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
         // Initialize the reader using the open_file method
-        let read = OmFileReader::new(Arc::new(read_backend))?.expect_array()?;
+        let read = OmFileReader::from_file(file)?;
+        let read = read.expect_array()?;
 
         // Read with io_size_max: 0, io_size_merge: 0
         let a = read.read::<f32>(&[0..5, 0..5])?;
@@ -1053,7 +1071,8 @@ fn test_nan() -> Result<(), Box<dyn std::error::Error>> {
         // Read the data back
         let file_for_reading = File::open(file)?;
         let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let reader = OmFileReader::new(Arc::new(read_backend))?.expect_array()?;
+        let reader = OmFileReader::new(Arc::new(read_backend))?;
+        let reader = reader.expect_array()?;
 
         // Assert that all values in the specified range are NaN
         let values = reader.read::<f32>(&[1..2, 1..2])?;
@@ -1135,9 +1154,8 @@ async fn test_read_async() -> Result<(), Box<dyn std::error::Error>> {
     {
         let file_for_reading = File::open(file)?;
         let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let async_reader = OmFileReaderAsync::new(Arc::new(read_backend))
-            .await?
-            .expect_array()?;
+        let async_reader = OmFileReaderAsync::new(Arc::new(read_backend)).await?;
+        let async_reader = async_reader.expect_array()?;
 
         let async_data = async_reader.read::<f32>(&[0..10, 0..10, 0..10]).await?;
 

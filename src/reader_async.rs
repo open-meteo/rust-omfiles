@@ -118,22 +118,22 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
         })
     }
 
-    pub fn expect_scalar(self) -> Result<OmFileScalar<Backend>, OmFilesError> {
+    pub fn expect_scalar(&self) -> Result<OmFileScalar<Backend>, OmFilesError> {
         if !self.data_type().is_scalar() {
             return Err(OmFilesError::InvalidDataType);
         }
         Ok(OmFileScalar {
-            backend: self.backend,
-            variable: self.variable,
+            backend: &self.backend,
+            variable: &self.variable,
         })
     }
 
-    pub fn expect_array(self) -> Result<OmFileAsyncArray<Backend>, OmFilesError> {
+    pub fn expect_array(&self) -> Result<OmFileAsyncArray<Backend>, OmFilesError> {
         self.expect_array_with_io_sizes(65536, 512)
     }
 
     pub fn expect_array_with_io_sizes(
-        self,
+        &self,
         io_size_max: u64,
         io_size_merge: u64,
     ) -> Result<OmFileAsyncArray<Backend>, OmFilesError> {
@@ -141,8 +141,8 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
             return Err(OmFilesError::InvalidDataType);
         }
         Ok(OmFileAsyncArray {
-            backend: self.backend,
-            variable: self.variable,
+            backend: &self.backend,
+            variable: &self.variable,
             semaphore: Arc::new(Semaphore::new(16)),
             io_size_max,
             io_size_merge,
@@ -150,11 +150,11 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
     }
 }
 
-pub struct OmFileAsyncArray<Backend> {
+pub struct OmFileAsyncArray<'a, Backend> {
     /// The backend that provides asynchronous data access
-    pub backend: Arc<Backend>,
+    pub backend: &'a Arc<Backend>,
     /// Container for variable metadata and raw data
-    variable: OmVariableContainer,
+    variable: &'a OmVariableContainer,
     /// Maximum number of concurrent data fetching operations
     semaphore: Arc<Semaphore>,
 
@@ -162,13 +162,13 @@ pub struct OmFileAsyncArray<Backend> {
     io_size_merge: u64,
 }
 
-impl<Backend: OmFileReaderBackendAsync> OmFileVariableImpl for OmFileAsyncArray<Backend> {
+impl<'a, Backend: OmFileReaderBackendAsync> OmFileVariableImpl for OmFileAsyncArray<'a, Backend> {
     fn variable(&self) -> &OmVariableContainer {
-        &self.variable
+        self.variable
     }
 }
 
-impl<Backend: OmFileReaderBackendAsync> OmArrayVariableImpl for OmFileAsyncArray<Backend> {
+impl<'a, Backend: OmFileReaderBackendAsync> OmArrayVariableImpl for OmFileAsyncArray<'a, Backend> {
     fn io_size_max(&self) -> u64 {
         self.io_size_max
     }
@@ -178,7 +178,7 @@ impl<Backend: OmFileReaderBackendAsync> OmArrayVariableImpl for OmFileAsyncArray
     }
 }
 
-impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncArray<Backend> {
+impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncArray<'a, Backend> {
     /// Sets the maximum number of concurrent fetch operations.
     /// # Parameters
     /// - `max_concurrency`: The maximum number of concurrent operations (must be > 0)
