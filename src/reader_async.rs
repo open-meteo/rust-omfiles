@@ -27,18 +27,7 @@ fn get_executor() -> &'static Executor<'static> {
     EXECUTOR.get_or_init(|| Executor::new())
 }
 
-/// Asynchronous reader for Open-Meteo file format.
-///
-/// [`OmFileReaderAsync`] provides optimized access to multi-dimensional weather and climate data
-/// using asynchronous I/O operations. It supports concurrent fetching of data chunks to minimize
-/// I/O latency while maintaining memory efficiency.
-///
-/// # Features
-/// - Concurrent data fetching with configurable parallelism
-/// - Compatible with various backend implementations for different storage types
-///
-/// # Type Parameters
-/// - `Backend`: The storage backend that implements `OmFileReaderBackendAsync`
+/// Represents any variable in an OmFile and allows access to it via an async backend.
 pub struct OmFileReaderAsync<Backend> {
     /// The backend that provides asynchronous data access
     backend: Arc<Backend>,
@@ -139,6 +128,7 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
     }
 }
 
+/// Represents an array variable in an OmFile and allows access to it via an async backend.
 pub struct OmFileAsyncArray<'a, Backend> {
     /// The backend that provides asynchronous data access
     backend: &'a Arc<Backend>,

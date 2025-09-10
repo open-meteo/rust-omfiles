@@ -17,7 +17,11 @@ use std::ops::Range;
 use std::os::raw::c_void;
 use std::sync::Arc;
 
+/// Represents any variable in an OmFile.
 ///
+/// Allows traversing the file hierarchy and can be downcast to a scalar or array variable.
+/// Therefore, the traits [`OmArrayVariable`], [`OmScalarVariable`](crate::traits::OmScalarVariable), and [`OmFileVariable`]
+/// need to be implemented and in scope.
 pub struct OmFileReader<Backend> {
     /// The backend that provides data via the get_bytes method
     backend: Arc<Backend>,
@@ -116,6 +120,7 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
     }
 }
 
+/// Represents a scalar variable in an OmFile.
 pub struct OmFileScalar<'a, Backend> {
     backend: &'a Arc<Backend>,
     variable: &'a OmVariableContainer,
@@ -148,6 +153,7 @@ impl<'a, Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileSca
     }
 }
 
+/// Represents an array variable in an OmFile.
 pub struct OmFileArray<'a, Backend> {
     /// The backend that provides data via the get_bytes method
     backend: &'a Arc<Backend>,
