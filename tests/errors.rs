@@ -1,10 +1,7 @@
 use ndarray::ArrayD;
-use omfiles::OmCompressionType;
-use omfiles::OmFilesError;
-use omfiles::backends::memory::InMemoryBackend;
-use omfiles::backends::mmapfile::MmapFile;
 use omfiles::reader::OmFileReader;
 use omfiles::writer::OmFileWriter;
+use omfiles::{InMemoryBackend, MmapFile, OmCompressionType, OmFilesError};
 use std::borrow::BorrowMut;
 use std::fs;
 use std::sync::Arc;

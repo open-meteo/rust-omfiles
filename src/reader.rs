@@ -1,4 +1,4 @@
-use crate::backends::mmapfile::{MmapFile, Mode};
+use crate::backends::mmapfile::{FileAccessMode, MmapFile};
 use crate::errors::OmFilesError;
 use crate::traits::OmFileArrayDataType;
 use crate::traits::{
@@ -228,7 +228,7 @@ impl OmFileReader<MmapFile> {
 
     /// Convenience initializer to create an `OmFileReader` from an existing `FileHandle`.
     pub fn from_file_handle(file_handle: File) -> Result<Self, OmFilesError> {
-        let mmap = MmapFile::new(file_handle, Mode::ReadOnly)
+        let mmap = MmapFile::new(file_handle, FileAccessMode::ReadOnly)
             .map_err(|e| OmFilesError::GenericError(format!("Failed to memory map file: {}", e)))?;
         Self::new(Arc::new(mmap))
     }

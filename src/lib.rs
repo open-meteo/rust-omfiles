@@ -8,7 +8,7 @@ pub mod reader_async;
 pub mod traits;
 mod variable;
 pub mod writer;
-pub mod backends {
+pub(crate) mod backends {
     mod file;
     pub mod memory;
     pub mod mmapfile;
@@ -26,6 +26,8 @@ pub(crate) mod utils {
 }
 mod errors;
 
+pub use backends::memory::InMemoryBackend;
+pub use backends::mmapfile::{FileAccessMode, MmapFile};
 pub use core::compression::OmCompressionType;
 pub use core::data_types::OmDataType;
 pub use variable::OmOffsetSize;

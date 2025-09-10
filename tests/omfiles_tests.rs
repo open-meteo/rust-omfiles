@@ -2,11 +2,7 @@ use macro_rules_attribute::apply;
 use ndarray::{Array2, ArrayD, ArrayViewD, s};
 use om_file_format_sys::{fpxdec32, fpxenc32};
 use omfiles::{
-    OmCompressionType, OmFilesError, OmOffsetSize,
-    backends::{
-        memory::InMemoryBackend,
-        mmapfile::{MmapFile, Mode},
-    },
+    FileAccessMode, InMemoryBackend, MmapFile, OmCompressionType, OmFilesError, OmOffsetSize,
     reader::OmFileReader,
     reader_async::OmFileReaderAsync,
     traits::{OmFileReadable, OmFileReaderBackend, OmFileVariable, OmScalarVariable},
@@ -198,9 +194,7 @@ fn test_write_large() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
-        let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let read = OmFileReader::new(Arc::new(read_backend))?;
+        let read = OmFileReader::from_file(file)?;
         let read = read.expect_array()?;
 
         let a1 = read.read::<f32>(&[50..51, 20..21, 1..2])?;
@@ -278,12 +272,7 @@ fn test_write_chunks() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         // test reading
-        let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-
-        let backend = Arc::new(read_backend);
-
-        let read = OmFileReader::new(backend.clone())?;
+        let read = OmFileReader::from_file(file)?;
         let read = read.expect_array()?;
 
         let a = read.read::<f32>(&[0..5, 0..5])?;
@@ -299,7 +288,7 @@ fn test_write_chunks() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(a, expected);
 
         // check the actual bytes of the file
-        let count = backend.count() as u64;
+        let count = read.backend.count() as u64;
         assert_eq!(count, 144);
 
         // let bytes = backend.get_bytes(0, count)?;
@@ -423,8 +412,7 @@ fn test_offset_write() -> Result<(), Box<dyn std::error::Error>> {
     {
         // Read the file
         let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let read = OmFileReader::new(Arc::new(read_backend))?;
+        let read = OmFileReader::from_file_handle(file_for_reading)?;
         let read = read.expect_array()?;
 
         // Read the data
@@ -492,10 +480,7 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         // Read the file
-        let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let backend = Arc::new(read_backend);
-        let read = OmFileReader::new(backend.clone())?;
+        let read = OmFileReader::from_file(file)?;
 
         assert_eq!(read.number_of_children(), 2);
 
@@ -529,9 +514,9 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        let count = backend.count();
+        let count = read.backend.count();
         assert_eq!(count, 240);
-        let bytes = backend.get_bytes(0, count as u64)?;
+        let bytes = read.backend.get_bytes(0, count as u64)?;
         assert_eq!(&bytes[0..3], &[79, 77, 3]);
         assert_eq!(&bytes[3..8], &[0, 3, 34, 140, 2]);
         // difference on x86 and ARM cause by the underlying compression
@@ -684,9 +669,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         // Verify the hierarchical structure
-        let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let reader = OmFileReader::new(Arc::new(read_backend))?;
+        let reader = OmFileReader::from_file(file)?;
         let reader = reader.expect_array()?;
 
         let all_children_meta = reader.get_flat_variable_metadata();
@@ -811,10 +794,7 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         // Open file for reading
-        let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let backend = Arc::new(read_backend);
-        let read = OmFileReader::new(backend.clone())?;
+        let read = OmFileReader::from_file(file)?;
         let read = read.expect_array()?;
 
         // Rest of test remains the same but using read.read::<f32>() instead of read_var.read()
@@ -958,8 +938,8 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
             assert_eq!(value, expected);
         }
 
-        let count = backend.count();
-        let bytes = backend.get_bytes(0, count as u64)?;
+        let count = read.backend.count();
+        let bytes = read.backend.get_bytes(0, count as u64)?;
         assert_eq!(
             &bytes,
             &[
@@ -1069,9 +1049,7 @@ fn test_nan() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         // Read the data back
-        let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let reader = OmFileReader::new(Arc::new(read_backend))?;
+        let reader = OmFileReader::from_file(file)?;
         let reader = reader.expect_array()?;
 
         // Assert that all values in the specified range are NaN
@@ -1103,7 +1081,7 @@ async fn test_opening_legacy_file() -> Result<(), Box<dyn std::error::Error>> {
 
     // Try to open the legacy file and check properties of the reader with async reader
     let file_for_reading = File::open(file)?;
-    let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
+    let read_backend = MmapFile::new(file_for_reading, FileAccessMode::ReadOnly)?;
     let async_reader = OmFileReaderAsync::new(Arc::new(read_backend)).await?;
     assert_eq!(async_reader.get_name(), None);
 
@@ -1153,7 +1131,7 @@ async fn test_read_async() -> Result<(), Box<dyn std::error::Error>> {
     // Test async read functionality
     {
         let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
+        let read_backend = MmapFile::new(file_for_reading, FileAccessMode::ReadOnly)?;
         let async_reader = OmFileReaderAsync::new(Arc::new(read_backend)).await?;
         let async_reader = async_reader.expect_array()?;
 

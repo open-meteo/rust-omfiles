@@ -10,10 +10,16 @@ use crate::{
     traits::{OmFileReaderBackend, OmFileReaderBackendAsync},
 };
 
+/// File access mode
+pub enum FileAccessMode {
+    ReadOnly,
+    ReadWrite,
+}
+
 /// Represents a memory-mapped file with support for read-only and read-write modes
 pub struct MmapFile {
-    pub data: MmapType,
-    pub file: File,
+    data: MmapType,
+    file: File,
 }
 
 /// Specifies how the memory-mapped file should be accessed and whether it is mutable
@@ -46,7 +52,7 @@ impl MmapType {
         }
     }
 
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         match self {
             MmapType::ReadOnly(mmap) => mmap.len(),
             MmapType::ReadWrite(mmap_mut) => mmap_mut.len(),
@@ -54,14 +60,9 @@ impl MmapType {
     }
 }
 
-pub enum Mode {
-    ReadOnly,
-    ReadWrite,
-}
-
-pub enum MAdvice {
+enum MAdvice {
     WillNeed,
-    DontNeed,
+    _DontNeed,
 }
 
 impl MAdvice {
@@ -69,7 +70,7 @@ impl MAdvice {
     fn advice(&self, mmap: &MmapType, offset: usize, len: usize) -> std::io::Result<()> {
         match self {
             MAdvice::WillNeed => mmap.advise_range(Advice::WillNeed, offset, len),
-            MAdvice::DontNeed => {
+            MAdvice::_DontNeed => {
                 mmap.unchecked_advise_range(UncheckedAdvice::DontNeed, offset, len)
             }
         }
@@ -83,10 +84,14 @@ impl MAdvice {
 
 impl MmapFile {
     /// Mmap the entire filehandle
-    pub fn new(file: File, mode: Mode) -> Result<Self, std::io::Error> {
+    pub fn new(file: File, mode: FileAccessMode) -> Result<Self, std::io::Error> {
         let data = match mode {
-            Mode::ReadOnly => MmapType::ReadOnly(unsafe { MmapOptions::new().map(&file)? }),
-            Mode::ReadWrite => MmapType::ReadWrite(unsafe { MmapOptions::new().map_mut(&file)? }),
+            FileAccessMode::ReadOnly => {
+                MmapType::ReadOnly(unsafe { MmapOptions::new().map(&file)? })
+            }
+            FileAccessMode::ReadWrite => {
+                MmapType::ReadWrite(unsafe { MmapOptions::new().map_mut(&file)? })
+            }
         };
         Ok(MmapFile { data, file })
     }
@@ -102,7 +107,7 @@ impl MmapFile {
     }
 
     /// Tell the OS to prefetch the required memory pages. Subsequent calls to read data should be faster
-    pub(crate) fn prefetch_data_advice(&self, offset: usize, count: usize, advice: MAdvice) {
+    fn prefetch_data_advice(&self, offset: usize, count: usize, advice: MAdvice) {
         let page_size = 4096;
         let page_start = offset / page_size * page_size;
         let page_end = (offset + count + page_size - 1) / page_size * page_size;
