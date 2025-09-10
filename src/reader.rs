@@ -24,7 +24,7 @@ use std::sync::Arc;
 /// need to be implemented and in scope.
 pub struct OmFileReader<Backend> {
     /// The backend that provides data via the get_bytes method
-    backend: Arc<Backend>,
+    pub backend: Arc<Backend>,
     /// The variable containing metadata and access methods
     variable: OmVariableContainer,
 }

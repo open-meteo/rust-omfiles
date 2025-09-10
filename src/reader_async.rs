@@ -30,7 +30,7 @@ fn get_executor() -> &'static Executor<'static> {
 /// Represents any variable in an OmFile and allows access to it via an async backend.
 pub struct OmFileReaderAsync<Backend> {
     /// The backend that provides asynchronous data access
-    backend: Arc<Backend>,
+    pub backend: Arc<Backend>,
     /// Container for variable metadata and raw data
     variable: OmVariableContainer,
 }
