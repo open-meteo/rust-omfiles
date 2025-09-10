@@ -1,7 +1,6 @@
-use core::slice;
-use std::mem;
-
 use om_file_format_sys::OmDataType_t;
+
+use crate::traits::{OmFileArrayDataType, OmFileScalarDataType};
 
 /// Data types supported in OmFiles.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -111,57 +110,6 @@ impl TryFrom<u8> for OmDataType {
             22 => Ok(OmDataType::StringArray),
             _ => Err("Invalid data type value"),
         }
-    }
-}
-
-/// Trait for types that can be stored as arrays in OmFiles
-pub trait OmFileArrayDataType {
-    const DATA_TYPE_ARRAY: OmDataType;
-}
-
-/// Trait for types that can be stored as scalars in OmFiles
-pub trait OmFileScalarDataType: Default {
-    const DATA_TYPE_SCALAR: OmDataType;
-
-    /// Creates a new instance from raw bytes
-    ///
-    /// This is the default implementation, which assumes that the bytes
-    /// represent a valid value of Self and that alignment requirements are met.
-    fn from_raw_bytes(bytes: &[u8]) -> Self {
-        assert!(
-            bytes.len() >= mem::size_of::<Self>(),
-            "Buffer too small to contain type of size {}",
-            mem::size_of::<Self>()
-        );
-
-        // Safety: This assumes the bytes represent a valid value of Self
-        // and that alignment requirements are met
-        unsafe {
-            let mut result = Self::default();
-            std::ptr::copy_nonoverlapping(
-                bytes.as_ptr(),
-                &mut result as *mut Self as *mut u8,
-                mem::size_of::<Self>(),
-            );
-            result
-        }
-    }
-
-    /// Performs an operation with the raw bytes of this value
-    ///
-    /// This is the default implementation, which passes a slice of the bytes
-    /// of self to the provided closure.
-    /// For String and OmNone types, this method is overridden to provide the
-    /// UTF-8 bytes of the string and an empty slice, respectively.
-    fn with_raw_bytes<T, F>(&self, f: F) -> T
-    where
-        F: FnOnce(&[u8]) -> T,
-    {
-        // Safety: This creates a slice that references the bytes of self
-        let bytes = unsafe {
-            slice::from_raw_parts(self as *const Self as *const u8, mem::size_of::<Self>())
-        };
-        f(bytes)
     }
 }
 

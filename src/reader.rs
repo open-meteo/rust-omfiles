@@ -1,9 +1,9 @@
 use crate::backends::mmapfile::{MmapFile, Mode};
-use crate::core::data_types::OmFileArrayDataType;
 use crate::errors::OmFilesError;
+use crate::traits::OmFileArrayDataType;
 use crate::traits::{
-    ArrayOmVariable, ArrayOmVariableImpl, OmFileReadableImpl, OmFileReaderBackend, OmFileVariable,
-    OmFileVariableImpl, ScalarOmVariableImpl,
+    OmArrayVariable, OmArrayVariableImpl, OmFileReadableImpl, OmFileReaderBackend, OmFileVariable,
+    OmFileVariableImpl, OmScalarVariableImpl,
 };
 use crate::utils::reader_utils::process_trailer;
 use crate::variable::OmVariableContainer;
@@ -127,7 +127,7 @@ impl<Backend: OmFileReaderBackend> OmFileVariableImpl for OmFileScalar<Backend> 
     }
 }
 
-impl<Backend: OmFileReaderBackend> ScalarOmVariableImpl for OmFileScalar<Backend> {}
+impl<Backend: OmFileReaderBackend> OmScalarVariableImpl for OmFileScalar<Backend> {}
 
 impl<Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileScalar<Backend> {
     fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReader<Backend> {
@@ -171,7 +171,7 @@ impl<Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileArray<B
     }
 }
 
-impl<Backend: OmFileReaderBackend> ArrayOmVariableImpl for OmFileArray<Backend> {
+impl<Backend: OmFileReaderBackend> OmArrayVariableImpl for OmFileArray<Backend> {
     fn io_size_max(&self) -> u64 {
         self.io_size_max
     }

@@ -1,8 +1,10 @@
+use crate::OmDataType;
 use crate::core::c_defaults::{c_error_string, create_uninit_encoder};
 use crate::core::compression::OmCompressionType;
-use crate::core::data_types::{OmDataType, OmFileArrayDataType, OmFileScalarDataType, OmNone};
+use crate::core::data_types::OmNone;
 use crate::errors::OmFilesError;
 use crate::traits::OmFileWriterBackend;
+use crate::traits::{OmFileArrayDataType, OmFileScalarDataType};
 use crate::utils::buffered_writer::OmBufferedWriter;
 use crate::variable::OmOffsetSize;
 use ndarray::ArrayViewD;
@@ -436,7 +438,7 @@ mod tests {
     use crate::{
         backends::memory::InMemoryBackend,
         reader::OmFileReader,
-        traits::{OmFileReadable, OmFileVariable, ScalarOmVariable},
+        traits::{OmFileReadable, OmFileVariable, OmScalarVariable},
     };
 
     use super::*;

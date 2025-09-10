@@ -9,7 +9,7 @@ use omfiles::{
     },
     reader::OmFileReader,
     reader_async::OmFileReaderAsync,
-    traits::{OmFileReadable, OmFileReaderBackend, OmFileVariable, ScalarOmVariable},
+    traits::{OmFileReadable, OmFileReaderBackend, OmFileVariable, OmScalarVariable},
     writer::OmFileWriter,
 };
 use smol_macros::test;

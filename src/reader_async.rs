@@ -5,11 +5,11 @@
 //! - Reading large meteorological datasets over the network
 //! - Processing high-resolution climate data with concurrent fetching
 
-use crate::core::data_types::OmFileArrayDataType;
 use crate::errors::OmFilesError;
 use crate::reader::OmFileScalar;
+use crate::traits::OmFileArrayDataType;
 use crate::traits::{
-    ArrayOmVariable, ArrayOmVariableImpl, OmFileReaderBackendAsync, OmFileVariable,
+    OmArrayVariable, OmArrayVariableImpl, OmFileReaderBackendAsync, OmFileVariable,
     OmFileVariableImpl,
 };
 use crate::utils::reader_utils::process_trailer;
@@ -168,7 +168,7 @@ impl<Backend: OmFileReaderBackendAsync> OmFileVariableImpl for OmFileAsyncArray<
     }
 }
 
-impl<Backend: OmFileReaderBackendAsync> ArrayOmVariableImpl for OmFileAsyncArray<Backend> {
+impl<Backend: OmFileReaderBackendAsync> OmArrayVariableImpl for OmFileAsyncArray<Backend> {
     fn io_size_max(&self) -> u64 {
         self.io_size_max
     }

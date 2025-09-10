@@ -1,5 +1,5 @@
 use crate::core::c_defaults::{c_error_string, new_data_read, new_index_read};
-use crate::core::data_types::{OmDataType, OmFileArrayDataType};
+use crate::core::data_types::OmDataType;
 use crate::errors::OmFilesError;
 use crate::reader::OmFileReader;
 use crate::variable::{OmOffsetSize, OmVariableContainer};
@@ -12,6 +12,58 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::ops::{Deref, Range};
 use std::os::raw::c_void;
+use std::{mem, slice};
+
+/// Trait for types that can be stored as arrays in OmFiles
+pub trait OmFileArrayDataType {
+    const DATA_TYPE_ARRAY: OmDataType;
+}
+
+/// Trait for types that can be stored as scalars in OmFiles
+pub trait OmFileScalarDataType: Default {
+    const DATA_TYPE_SCALAR: OmDataType;
+
+    /// Creates a new instance from raw bytes
+    ///
+    /// This is the default implementation, which assumes that the bytes
+    /// represent a valid value of Self and that alignment requirements are met.
+    fn from_raw_bytes(bytes: &[u8]) -> Self {
+        assert!(
+            bytes.len() >= mem::size_of::<Self>(),
+            "Buffer too small to contain type of size {}",
+            mem::size_of::<Self>()
+        );
+
+        // Safety: This assumes the bytes represent a valid value of Self
+        // and that alignment requirements are met
+        unsafe {
+            let mut result = Self::default();
+            std::ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                &mut result as *mut Self as *mut u8,
+                mem::size_of::<Self>(),
+            );
+            result
+        }
+    }
+
+    /// Performs an operation with the raw bytes of this value
+    ///
+    /// This is the default implementation, which passes a slice of the bytes
+    /// of self to the provided closure.
+    /// For String and OmNone types, this method is overridden to provide the
+    /// UTF-8 bytes of the string and an empty slice, respectively.
+    fn with_raw_bytes<T, F>(&self, f: F) -> T
+    where
+        F: FnOnce(&[u8]) -> T,
+    {
+        // Safety: This creates a slice that references the bytes of self
+        let bytes = unsafe {
+            slice::from_raw_parts(self as *const Self as *const u8, mem::size_of::<Self>())
+        };
+        f(bytes)
+    }
+}
 
 /// A trait for writing byte data synchronously to different storage backends.
 pub trait OmFileWriterBackend {
@@ -158,9 +210,9 @@ impl<T: OmFileVariableImpl> OmFileVariable for T {
     }
 }
 
-pub(crate) trait ScalarOmVariableImpl: OmFileVariableImpl + OmFileVariable {
+pub(crate) trait OmScalarVariableImpl: OmFileVariableImpl + OmFileVariable {
     /// Read a scalar value of the specified type
-    fn read_scalar<T: crate::core::data_types::OmFileScalarDataType>(&self) -> Option<T> {
+    fn read_scalar<T: OmFileScalarDataType>(&self) -> Option<T> {
         if T::DATA_TYPE_SCALAR != self.data_type() {
             return None;
         }
@@ -189,25 +241,25 @@ pub(crate) trait ScalarOmVariableImpl: OmFileVariableImpl + OmFileVariable {
 }
 
 /// A scalar variable in an OmFile.
-pub trait ScalarOmVariable {
+pub trait OmScalarVariable {
     /// Read a scalar value of the specified type
-    fn read_scalar<T: crate::core::data_types::OmFileScalarDataType>(&self) -> Option<T>;
+    fn read_scalar<T: OmFileScalarDataType>(&self) -> Option<T>;
 }
 
-// Blanket implementation of ScalarOmVariable
-impl<T: ScalarOmVariableImpl> ScalarOmVariable for T {
-    fn read_scalar<U: crate::core::data_types::OmFileScalarDataType>(&self) -> Option<U> {
-        ScalarOmVariableImpl::read_scalar(self)
+// Blanket implementation of OmScalarVariable
+impl<T: OmScalarVariableImpl> OmScalarVariable for T {
+    fn read_scalar<U: OmFileScalarDataType>(&self) -> Option<U> {
+        OmScalarVariableImpl::read_scalar(self)
     }
 }
 
-pub(crate) trait ArrayOmVariableImpl: OmFileVariableImpl {
+pub(crate) trait OmArrayVariableImpl: OmFileVariableImpl {
     fn io_size_max(&self) -> u64;
     fn io_size_merge(&self) -> u64;
 }
 
 /// An array variable in an OmFile.
-pub trait ArrayOmVariable {
+pub trait OmArrayVariable {
     /// Returns the compression type of the variable
     fn compression(&self) -> crate::core::compression::OmCompressionType;
     /// Returns the scale factor of the variable
@@ -228,8 +280,8 @@ pub trait ArrayOmVariable {
     ) -> Result<crate::utils::wrapped_decoder::WrappedDecoder, OmFilesError>;
 }
 
-// Blanket implementation of ArrayOmVariable for types implementing ArrayOmVariableImpl
-impl<T: ArrayOmVariableImpl> ArrayOmVariable for T {
+// Blanket implementation of OmArrayVariable for types implementing OmArrayVariableImpl
+impl<T: OmArrayVariableImpl> OmArrayVariable for T {
     /// Returns the compression type of the variable
     fn compression(&self) -> crate::core::compression::OmCompressionType {
         unsafe {
