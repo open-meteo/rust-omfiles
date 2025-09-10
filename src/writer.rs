@@ -19,6 +19,7 @@ use std::borrow::BorrowMut;
 use std::marker::PhantomData;
 use std::os::raw::c_void;
 
+/// Writer for OmFile format.
 pub struct OmFileWriter<Backend: OmFileWriterBackend> {
     buffer: OmBufferedWriter<Backend>,
 }
@@ -196,6 +197,12 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
     }
 }
 
+/// The OmFileWriterArray allows streaming large nd-arrays to an OmFile.
+///
+/// After writing the complete array to the file, you need to call the [`finalize()`](Self::finalize)
+/// method to write the lookup table.
+/// The [`OmFileWriterArrayFinalized`] then needs to be referenced in the final OmFile
+/// as root variable or as child variable of another variable.
 pub struct OmFileWriterArray<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend> {
     look_up_table: Vec<u64>,
     encoder: OmEncoder_t,
@@ -374,7 +381,7 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
     }
 
     /// Compress the lookup table and write it to the output buffer.
-    pub fn write_lut(&mut self) -> u64 {
+    fn write_lut(&mut self) -> u64 {
         let buffer_size = unsafe {
             om_encoder_lut_buffer_size(self.look_up_table.as_ptr(), self.look_up_table.len() as u64)
         };
@@ -415,15 +422,19 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
     }
 }
 
+/// An array variable that has already been written to the file.
+///
+/// The [`OmFileWriterArrayFinalized`] struct contains information about the array variable,
+/// by which it can later be identified in the file.
 pub struct OmFileWriterArrayFinalized {
-    pub scale_factor: f32,
-    pub add_offset: f32,
-    pub compression: OmCompressionType,
-    pub data_type: OmDataType,
-    pub dimensions: Vec<u64>,
-    pub chunks: Vec<u64>,
-    pub lut_size: u64,
-    pub lut_offset: u64,
+    scale_factor: f32,
+    add_offset: f32,
+    compression: OmCompressionType,
+    data_type: OmDataType,
+    dimensions: Vec<u64>,
+    chunks: Vec<u64>,
+    lut_size: u64,
+    lut_offset: u64,
 }
 
 #[cfg(test)]
