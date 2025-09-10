@@ -1,11 +1,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use ndarray::{Array, ArrayViewD};
 use omfiles::{
-    OmCompressionType,
-    backends::{
-        memory::InMemoryBackend,
-        mmapfile::{MmapFile, Mode},
-    },
+    InMemoryBackend, OmCompressionType,
     {reader::OmFileReader, writer::OmFileWriter},
 };
 use rand::Rng;
@@ -13,7 +9,6 @@ use std::{
     borrow::BorrowMut,
     fs::{self, File},
     hint::black_box,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -112,9 +107,7 @@ pub fn benchmark_read(c: &mut Criterion) {
     let mut group = c.benchmark_group("Read OM file");
 
     let file = "benchmark.om";
-    let file_for_reading = File::open(file).unwrap();
-    let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly).unwrap();
-    let reader = OmFileReader::new(Arc::new(read_backend)).unwrap();
+    let reader = OmFileReader::from_file(file).unwrap();
     let reader = reader.expect_array().unwrap();
 
     let dim0_read_size = 256;

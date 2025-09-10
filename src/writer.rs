@@ -1,3 +1,5 @@
+//! Writer-related structs for OmFile format.
+
 use crate::OmDataType;
 use crate::core::c_defaults::{c_error_string, create_uninit_encoder};
 use crate::core::compression::OmCompressionType;

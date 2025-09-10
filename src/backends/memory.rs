@@ -5,6 +5,9 @@ use crate::{
     traits::{OmFileReaderBackend, OmFileWriterBackend},
 };
 
+/// In-memory backend implementation for OmFiles.
+///
+/// Implements the [`OmFileReaderBackend`](`OmFileReaderBackend`) and [`OmFileWriterBackend`](`OmFileWriterBackend`) traits.
 #[derive(Debug)]
 pub struct InMemoryBackend {
     data: Vec<u8>,

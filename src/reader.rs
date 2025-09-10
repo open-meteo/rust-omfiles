@@ -1,3 +1,5 @@
+//! Sync reader related structs for OmFiles.
+
 use crate::backends::mmapfile::{FileAccessMode, MmapFile};
 use crate::errors::OmFilesError;
 use crate::traits::OmFileArrayDataType;
@@ -15,9 +17,10 @@ use std::ops::Range;
 use std::os::raw::c_void;
 use std::sync::Arc;
 
+///
 pub struct OmFileReader<Backend> {
     /// The backend that provides data via the get_bytes method
-    pub backend: Arc<Backend>,
+    backend: Arc<Backend>,
     /// The variable containing metadata and access methods
     variable: OmVariableContainer,
 }
@@ -89,10 +92,7 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
         if !self.data_type().is_scalar() {
             return Err(OmFilesError::InvalidDataType);
         }
-        Ok(OmFileScalar {
-            backend: &self.backend,
-            variable: &self.variable,
-        })
+        Ok(OmFileScalar::new(&self.backend, &self.variable))
     }
 
     pub fn expect_array(&self) -> Result<OmFileArray<Backend>, OmFilesError> {
@@ -117,8 +117,14 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
 }
 
 pub struct OmFileScalar<'a, Backend> {
-    pub(crate) backend: &'a Arc<Backend>,
-    pub(crate) variable: &'a OmVariableContainer,
+    backend: &'a Arc<Backend>,
+    variable: &'a OmVariableContainer,
+}
+
+impl<'a, Backend> OmFileScalar<'a, Backend> {
+    pub(crate) fn new(backend: &'a Arc<Backend>, variable: &'a OmVariableContainer) -> Self {
+        OmFileScalar { backend, variable }
+    }
 }
 
 impl<'a, Backend> OmFileVariableImpl for OmFileScalar<'a, Backend> {
@@ -144,7 +150,7 @@ impl<'a, Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileSca
 
 pub struct OmFileArray<'a, Backend> {
     /// The backend that provides data via the get_bytes method
-    pub backend: &'a Arc<Backend>,
+    backend: &'a Arc<Backend>,
     /// The variable containing metadata and access methods
     variable: &'a OmVariableContainer,
 

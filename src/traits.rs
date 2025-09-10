@@ -1,3 +1,4 @@
+//! All traits related to the Open-Meteo file format.
 use crate::core::c_defaults::{c_error_string, new_data_read, new_index_read};
 use crate::core::data_types::OmDataType;
 use crate::errors::OmFilesError;
@@ -67,7 +68,10 @@ pub trait OmFileScalarDataType: Default {
 
 /// A trait for writing byte data synchronously to different storage backends.
 pub trait OmFileWriterBackend {
+    /// Write bytes at the current position to the backend.
     fn write(&mut self, data: &[u8]) -> Result<(), OmFilesError>;
+
+    /// Synchronize the backend's data to disk.
     fn synchronize(&self) -> Result<(), OmFilesError>;
 }
 

@@ -272,7 +272,9 @@ fn test_write_chunks() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         // test reading
-        let read = OmFileReader::from_file(file)?;
+        let file_for_reading = File::open(file)?;
+        let backend = Arc::new(MmapFile::new(file_for_reading, FileAccessMode::ReadOnly)?);
+        let read = OmFileReader::new(backend.clone())?;
         let read = read.expect_array()?;
 
         let a = read.read::<f32>(&[0..5, 0..5])?;
@@ -288,7 +290,7 @@ fn test_write_chunks() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(a, expected);
 
         // check the actual bytes of the file
-        let count = read.backend.count() as u64;
+        let count = backend.count() as u64;
         assert_eq!(count, 144);
 
         // let bytes = backend.get_bytes(0, count)?;
@@ -480,7 +482,9 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         // Read the file
-        let read = OmFileReader::from_file(file)?;
+        let file_for_reading = File::open(file)?;
+        let backend = Arc::new(MmapFile::new(file_for_reading, FileAccessMode::ReadOnly)?);
+        let read = OmFileReader::new(backend.clone())?;
 
         assert_eq!(read.number_of_children(), 2);
 
@@ -514,9 +518,9 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        let count = read.backend.count();
+        let count = backend.count();
         assert_eq!(count, 240);
-        let bytes = read.backend.get_bytes(0, count as u64)?;
+        let bytes = backend.get_bytes(0, count as u64)?;
         assert_eq!(&bytes[0..3], &[79, 77, 3]);
         assert_eq!(&bytes[3..8], &[0, 3, 34, 140, 2]);
         // difference on x86 and ARM cause by the underlying compression
@@ -794,7 +798,9 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         // Open file for reading
-        let read = OmFileReader::from_file(file)?;
+        let file_for_reading = File::open(file)?;
+        let backend = Arc::new(MmapFile::new(file_for_reading, FileAccessMode::ReadOnly)?);
+        let read = OmFileReader::new(backend.clone())?;
         let read = read.expect_array()?;
 
         // Rest of test remains the same but using read.read::<f32>() instead of read_var.read()
@@ -938,8 +944,8 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
             assert_eq!(value, expected);
         }
 
-        let count = read.backend.count();
-        let bytes = read.backend.get_bytes(0, count as u64)?;
+        let count = backend.count();
+        let bytes = backend.get_bytes(0, count as u64)?;
         assert_eq!(
             &bytes,
             &[

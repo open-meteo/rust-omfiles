@@ -16,7 +16,10 @@ pub enum FileAccessMode {
     ReadWrite,
 }
 
-/// Represents a memory-mapped file with support for read-only and read-write modes
+/// Represents a memory-mapped file and implements the [`OmFileReaderBackend`](`OmFileReaderBackend`) trait.
+///
+/// The memory-mapped file can be mapped with read-only and read-write modes, but you should normally
+/// only use the read-only mode!
 pub struct MmapFile {
     data: MmapType,
     file: File,

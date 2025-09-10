@@ -1,9 +1,4 @@
-//! Asynchronous reader implementation for the Open-Meteo file format.
-//!
-//! This module provides functionality to read Open-Meteo files asynchronously,
-//! which is particularly useful for I/O-bound operations like:
-//! - Reading large meteorological datasets over the network
-//! - Processing high-resolution climate data with concurrent fetching
+//! Async reader related structs for OmFiles.
 
 use crate::errors::OmFilesError;
 use crate::reader::OmFileScalar;
@@ -34,7 +29,7 @@ fn get_executor() -> &'static Executor<'static> {
 
 /// Asynchronous reader for Open-Meteo file format.
 ///
-/// `OmFileReaderAsync` provides optimized access to multi-dimensional weather and climate data
+/// [`OmFileReaderAsync`] provides optimized access to multi-dimensional weather and climate data
 /// using asynchronous I/O operations. It supports concurrent fetching of data chunks to minimize
 /// I/O latency while maintaining memory efficiency.
 ///
@@ -46,7 +41,7 @@ fn get_executor() -> &'static Executor<'static> {
 /// - `Backend`: The storage backend that implements `OmFileReaderBackendAsync`
 pub struct OmFileReaderAsync<Backend> {
     /// The backend that provides asynchronous data access
-    pub backend: Arc<Backend>,
+    backend: Arc<Backend>,
     /// Container for variable metadata and raw data
     variable: OmVariableContainer,
 }
@@ -56,9 +51,6 @@ impl<Backend: OmFileReaderBackendAsync> OmFileVariableImpl for OmFileReaderAsync
         &self.variable
     }
 }
-
-// implement utility methods for OmFileReaderAsync
-// implement_scalar_variable_methods!(OmFileReaderAsync<Backend>);
 
 impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsync<Backend> {
     /// Creates a new asynchronous reader for an Open-Meteo file.
@@ -122,10 +114,7 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
         if !self.data_type().is_scalar() {
             return Err(OmFilesError::InvalidDataType);
         }
-        Ok(OmFileScalar {
-            backend: &self.backend,
-            variable: &self.variable,
-        })
+        Ok(OmFileScalar::new(&self.backend, &self.variable))
     }
 
     pub fn expect_array(&self) -> Result<OmFileAsyncArray<Backend>, OmFilesError> {
@@ -152,7 +141,7 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
 
 pub struct OmFileAsyncArray<'a, Backend> {
     /// The backend that provides asynchronous data access
-    pub backend: &'a Arc<Backend>,
+    backend: &'a Arc<Backend>,
     /// Container for variable metadata and raw data
     variable: &'a OmVariableContainer,
     /// Maximum number of concurrent data fetching operations
