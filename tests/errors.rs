@@ -1,10 +1,7 @@
 use ndarray::ArrayD;
-use omfiles::backend::backends::InMemoryBackend;
-use omfiles::backend::mmapfile::MmapFile;
-use omfiles::core::compression::CompressionType;
-use omfiles::errors::OmFilesRsError;
-use omfiles::io::reader::OmFileReader;
-use omfiles::io::writer::OmFileWriter;
+use omfiles::reader::OmFileReader;
+use omfiles::writer::OmFileWriter;
+use omfiles::{InMemoryBackend, MmapFile, OmCompressionType, OmFilesError};
 use std::borrow::BorrowMut;
 use std::fs;
 use std::sync::Arc;
@@ -18,7 +15,7 @@ fn test_mismatching_cube_dimension_length() {
     let mut writer = OmFileWriter::new(backend.borrow_mut(), 1024);
 
     let result =
-        writer.prepare_array::<i32>(vec![10, 10], vec![5], CompressionType::None, 1.0, 0.0);
+        writer.prepare_array::<i32>(vec![10, 10], vec![5], OmCompressionType::None, 1.0, 0.0);
 
     assert_eq!(error_string(result), "Mismatching cube dimension length");
 }
@@ -32,7 +29,7 @@ fn test_chunk_has_wrong_number_of_elements() {
         .prepare_array::<i32>(
             vec![10, 10],
             vec![5, 5],
-            CompressionType::PforDelta2d,
+            OmCompressionType::PforDelta2d,
             1.0,
             0.0,
         )
@@ -53,7 +50,7 @@ fn test_offset_and_count_exceed_dimension() {
         .prepare_array::<i32>(
             vec![10, 10],
             vec![5, 5],
-            CompressionType::PforDelta2d,
+            OmCompressionType::PforDelta2d,
             1.0,
             0.0,
         )
@@ -87,7 +84,7 @@ fn test_mismatching_cube_dimension_length_for_read() {
             .prepare_array::<i32>(
                 vec![10, 10],
                 vec![5, 5],
-                CompressionType::PforDelta2d,
+                OmCompressionType::PforDelta2d,
                 1.0,
                 0.0,
             )
@@ -102,7 +99,8 @@ fn test_mismatching_cube_dimension_length_for_read() {
     }
 
     let reader = OmFileReader::new(Arc::new(backend)).unwrap();
-    let result = reader.read::<i32>(&[0..10], None, None);
+    let reader = reader.expect_array().unwrap();
+    let result = reader.read::<i32>(&[0..10]);
 
     assert_eq!(error_string(result), "Mismatching cube dimension length");
 }
@@ -114,7 +112,7 @@ fn test_opening_not_an_om_file() {
 
     // Try to open the file as an OM file
     let result = OmFileReader::<MmapFile>::from_file(short_file);
-    assert!(matches!(result, Err(OmFilesRsError::FileTooSmall)));
+    assert!(matches!(result, Err(OmFilesError::FileTooSmall)));
     remove_file_if_exists(short_file);
 
     let longer_file = "not_an_om_file.txt";
@@ -126,10 +124,10 @@ fn test_opening_not_an_om_file() {
 
     // Try to open the file as an OM file
     let result = OmFileReader::<MmapFile>::from_file(longer_file);
-    assert!(matches!(result, Err(OmFilesRsError::NotAnOmFile)));
+    assert!(matches!(result, Err(OmFilesError::NotAnOmFile)));
     remove_file_if_exists(longer_file);
 }
-fn error_string<T>(result: Result<T, OmFilesRsError>) -> String {
+fn error_string<T>(result: Result<T, OmFilesError>) -> String {
     match result {
         Ok(_) => {
             assert!(false, "Expected error");

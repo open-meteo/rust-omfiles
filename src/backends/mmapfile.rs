@@ -1,12 +1,28 @@
+//! Reader backend implementation based on memory-mapped files.
+
 #[cfg(unix)]
 use memmap2::{Advice, UncheckedAdvice};
 use memmap2::{Mmap, MmapMut, MmapOptions};
 use std::fs::File;
 
-/// Represents a memory-mapped file with support for read-only and read-write modes
+use crate::{
+    errors::OmFilesError,
+    traits::{OmFileReaderBackend, OmFileReaderBackendAsync},
+};
+
+/// File access mode
+pub enum FileAccessMode {
+    ReadOnly,
+    ReadWrite,
+}
+
+/// Represents a memory-mapped file and implements the [`OmFileReaderBackend`](`OmFileReaderBackend`) trait.
+///
+/// The memory-mapped file can be mapped with read-only and read-write modes, but you should normally
+/// only use the read-only mode!
 pub struct MmapFile {
-    pub data: MmapType,
-    pub file: File,
+    data: MmapType,
+    file: File,
 }
 
 /// Specifies how the memory-mapped file should be accessed and whether it is mutable
@@ -39,7 +55,7 @@ impl MmapType {
         }
     }
 
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         match self {
             MmapType::ReadOnly(mmap) => mmap.len(),
             MmapType::ReadWrite(mmap_mut) => mmap_mut.len(),
@@ -47,23 +63,9 @@ impl MmapType {
     }
 }
 
-pub enum Mode {
-    ReadOnly,
-    ReadWrite,
-}
-
-impl Mode {
-    fn is_read_only(&self) -> bool {
-        match self {
-            Mode::ReadOnly => true,
-            Mode::ReadWrite => false,
-        }
-    }
-}
-
-pub enum MAdvice {
+enum MAdvice {
     WillNeed,
-    DontNeed,
+    _DontNeed,
 }
 
 impl MAdvice {
@@ -71,7 +73,7 @@ impl MAdvice {
     fn advice(&self, mmap: &MmapType, offset: usize, len: usize) -> std::io::Result<()> {
         match self {
             MAdvice::WillNeed => mmap.advise_range(Advice::WillNeed, offset, len),
-            MAdvice::DontNeed => {
+            MAdvice::_DontNeed => {
                 mmap.unchecked_advise_range(UncheckedAdvice::DontNeed, offset, len)
             }
         }
@@ -85,17 +87,20 @@ impl MAdvice {
 
 impl MmapFile {
     /// Mmap the entire filehandle
-    pub fn new(file: File, mode: Mode) -> Result<Self, std::io::Error> {
-        let data = if mode.is_read_only() {
-            MmapType::ReadOnly(unsafe { MmapOptions::new().map(&file)? })
-        } else {
-            MmapType::ReadWrite(unsafe { MmapOptions::new().map_mut(&file)? })
+    pub fn new(file: File, mode: FileAccessMode) -> Result<Self, std::io::Error> {
+        let data = match mode {
+            FileAccessMode::ReadOnly => {
+                MmapType::ReadOnly(unsafe { MmapOptions::new().map(&file)? })
+            }
+            FileAccessMode::ReadWrite => {
+                MmapType::ReadWrite(unsafe { MmapOptions::new().map_mut(&file)? })
+            }
         };
         Ok(MmapFile { data, file })
     }
 
     /// Check if the file was deleted on the file system. Linux keeps the file alive as long as some processes have it open.
-    pub fn was_deleted(&self) -> bool {
+    pub(crate) fn was_deleted(&self) -> bool {
         // Try to stat the file to see if it still exists
         match self.file.metadata() {
             Ok(_) => false,
@@ -104,8 +109,8 @@ impl MmapFile {
         }
     }
 
-    /// Tell the OS to prefault the required memory pages. Subsequent calls to read data should be faster
-    pub fn prefetch_data_advice(&self, offset: usize, count: usize, advice: MAdvice) {
+    /// Tell the OS to prefetch the required memory pages. Subsequent calls to read data should be faster
+    fn prefetch_data_advice(&self, offset: usize, count: usize, advice: MAdvice) {
         let page_size = 4096;
         let page_start = offset / page_size * page_size;
         let page_end = (offset + count + page_size - 1) / page_size * page_size;
@@ -127,5 +132,36 @@ impl MmapFile {
 impl Drop for MmapFile {
     fn drop(&mut self) {
         // The Mmap type will automatically unmap the memory when it is dropped
+    }
+}
+
+impl OmFileReaderBackend for MmapFile {
+    type Bytes<'a> = &'a [u8];
+
+    fn count(&self) -> usize {
+        self.data.len()
+    }
+
+    fn prefetch_data(&self, offset: usize, count: usize) {
+        self.prefetch_data_advice(offset, count, MAdvice::WillNeed);
+    }
+
+    fn get_bytes(&self, offset: u64, count: u64) -> Result<Self::Bytes<'_>, OmFilesError> {
+        let index_range = (offset as usize)..(offset + count) as usize;
+        match self.data {
+            MmapType::ReadOnly(ref mmap) => Ok(&mmap[index_range]),
+            MmapType::ReadWrite(ref mmap_mut) => Ok(&mmap_mut[index_range]),
+        }
+    }
+}
+
+impl OmFileReaderBackendAsync for MmapFile {
+    fn count_async(&self) -> usize {
+        self.data.len()
+    }
+
+    async fn get_bytes_async(&self, offset: u64, count: u64) -> Result<Vec<u8>, OmFilesError> {
+        let data = self.get_bytes(offset, count);
+        Ok(data?.to_vec())
     }
 }

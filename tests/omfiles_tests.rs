@@ -1,31 +1,21 @@
 use macro_rules_attribute::apply;
 use ndarray::{Array2, ArrayD, ArrayViewD, s};
-use om_file_format_sys::{
-    OmError_t, fpxdec32, fpxenc32, om_variable_get_children_count, om_variable_get_scalar,
-    om_variable_get_type, om_variable_init, om_variable_write_scalar,
-    om_variable_write_scalar_size,
-};
+use om_file_format_sys::{fpxdec32, fpxenc32};
 use omfiles::{
-    backend::{
-        backends::{InMemoryBackend, OmFileReaderBackend},
-        mmapfile::{MmapFile, Mode},
+    FileAccessMode, InMemoryBackend, MmapFile, OmCompressionType, OmFilesError, OmOffsetSize,
+    reader::OmFileReader,
+    reader_async::OmFileReaderAsync,
+    traits::{
+        OmArrayVariable, OmFileReadable, OmFileReaderBackend, OmFileVariable, OmScalarVariable,
     },
-    core::{compression::CompressionType, data_types::DataType},
-    errors::OmFilesRsError,
-    io::{
-        reader::OmFileReader,
-        reader_async::OmFileReaderAsync,
-        writer::{OmFileWriter, OmOffsetSize},
-    },
+    writer::OmFileWriter,
 };
 use smol_macros::test;
 use std::{
     borrow::BorrowMut,
     collections::HashMap,
     f32::{self},
-    ffi::c_void,
     fs::{self, File},
-    ptr, slice,
     sync::Arc,
 };
 
@@ -78,213 +68,6 @@ fn turbo_pfor_roundtrip() {
 }
 
 #[test]
-fn test_variable() {
-    let name = "name";
-
-    // Calculate size needed for scalar variable
-    let size_scalar =
-        unsafe { om_variable_write_scalar_size(name.len() as u16, 0, DataType::Int8.to_c(), 0) };
-
-    assert_eq!(size_scalar, 13);
-
-    // Create buffer for the variable
-    let mut data = vec![255u8; size_scalar];
-    let value: u8 = 177;
-
-    // Write the scalar variable
-    unsafe {
-        om_variable_write_scalar(
-            data.as_mut_ptr() as *mut std::os::raw::c_void,
-            name.len() as u16,
-            0,
-            ptr::null(),
-            ptr::null(),
-            name.as_ptr() as *const ::std::os::raw::c_char,
-            DataType::Int8.to_c(),
-            &value as *const u8 as *const std::os::raw::c_void,
-            0,
-        );
-    }
-
-    assert_eq!(data, [1, 4, 4, 0, 0, 0, 0, 0, 177, 110, 97, 109, 101]);
-
-    // Initialize a variable from the data
-    let om_variable = unsafe { om_variable_init(data.as_ptr() as *const c_void) };
-
-    // Verify the variable type and children count
-    unsafe {
-        assert_eq!(om_variable_get_type(om_variable), DataType::Int8.to_c());
-        assert_eq!(om_variable_get_children_count(om_variable), 0);
-    }
-
-    // Get the scalar value
-    let mut ptr: *mut std::os::raw::c_void = ptr::null_mut();
-    let mut size: u64 = 0;
-
-    let error = unsafe { om_variable_get_scalar(om_variable, &mut ptr, &mut size) };
-
-    // Verify successful retrieval and the value
-    assert_eq!(error, OmError_t::ERROR_OK);
-    assert!(!ptr.is_null());
-
-    let result_value = unsafe { *(ptr as *const u8) };
-    assert_eq!(result_value, value);
-}
-
-#[test]
-fn test_variable_string() {
-    let name = "name";
-    let value = "Hello, World!";
-
-    // Calculate size for string scalar
-    let size_scalar = unsafe {
-        om_variable_write_scalar_size(
-            name.len() as u16,
-            0,
-            DataType::String.to_c(),
-            value.len() as u64,
-        )
-    };
-
-    assert_eq!(size_scalar, 33);
-
-    // Create buffer for the variable
-    let mut data = vec![255u8; size_scalar];
-
-    // Write the string scalar
-    unsafe {
-        om_variable_write_scalar(
-            data.as_mut_ptr() as *mut std::os::raw::c_void,
-            name.len() as u16,
-            0,
-            ptr::null(),
-            ptr::null(),
-            name.as_ptr() as *const ::std::os::raw::c_char,
-            DataType::String.to_c(),
-            value.as_ptr() as *const std::os::raw::c_void,
-            value.len(),
-        );
-    }
-
-    // Verify the written data
-    let expected = [
-        11, // OmDataType_t: 11 = DATA_TYPE_STRING
-        4,  // OmCompression_t: 4 = COMPRESSION_NONE
-        4, 0, // Size of name
-        0, 0, 0, 0, // Children count
-        13, 0, 0, 0, 0, 0, 0, 0, // stringSize
-        72, 101, 108, 108, 111, 44, 32, 87, 111, 114, 108, 100, 33, // "Hello, World!"
-        110, 97, 109, 101, // "name"
-    ];
-
-    assert_eq!(data, expected);
-
-    // Initialize a variable from the data
-    let om_variable = unsafe { om_variable_init(data.as_ptr() as *const c_void) };
-
-    // Verify the variable type and children count
-    unsafe {
-        assert_eq!(om_variable_get_type(om_variable), DataType::String.to_c());
-        assert_eq!(om_variable_get_children_count(om_variable), 0);
-    }
-
-    // Get the scalar value
-    let mut ptr: *mut std::os::raw::c_void = ptr::null_mut();
-    let mut size: u64 = 0;
-
-    let error = unsafe { om_variable_get_scalar(om_variable, &mut ptr, &mut size) };
-
-    // Verify successful retrieval and the value
-    assert_eq!(error, OmError_t::ERROR_OK);
-    assert!(!ptr.is_null());
-
-    // Convert the raw bytes back to a string
-    let string_bytes = unsafe { slice::from_raw_parts(ptr as *const u8, size as usize) };
-    let result_string = std::str::from_utf8(string_bytes).unwrap();
-
-    assert_eq!(result_string, value);
-}
-
-#[test]
-fn test_variable_none() {
-    let name = "name";
-
-    // Calculate size for None type scalar
-    let size_scalar =
-        unsafe { om_variable_write_scalar_size(name.len() as u16, 0, DataType::None.to_c(), 0) };
-
-    assert_eq!(size_scalar, 12); // 8 (header) + 4 (name length) + 0 (no value)
-
-    // Create buffer for the variable
-    let mut data = vec![255u8; size_scalar];
-
-    // Write the non-existing value -> This is essentially creating a Group
-    unsafe {
-        om_variable_write_scalar(
-            data.as_mut_ptr() as *mut std::os::raw::c_void,
-            name.len() as u16,
-            0,
-            ptr::null(),
-            ptr::null(),
-            name.as_ptr() as *const ::std::os::raw::c_char,
-            DataType::None.to_c(),
-            ptr::null(),
-            0,
-        );
-    }
-
-    // Verify the written data
-    assert_eq!(data, [0, 4, 4, 0, 0, 0, 0, 0, 110, 97, 109, 101]);
-
-    // Initialize a variable from the data
-    let om_variable = unsafe { om_variable_init(data.as_ptr() as *const c_void) };
-
-    // Verify the variable type and children count
-    unsafe {
-        assert_eq!(om_variable_get_type(om_variable), DataType::None.to_c());
-        assert_eq!(om_variable_get_children_count(om_variable), 0);
-    }
-
-    // Try to get scalar value from None type (should fail)
-    let mut ptr: *mut std::os::raw::c_void = ptr::null_mut();
-    let mut size: u64 = 0;
-
-    let error = unsafe { om_variable_get_scalar(om_variable, &mut ptr, &mut size) };
-
-    // Verify that retrieval fails with the expected error
-    assert_eq!(error, OmError_t::ERROR_INVALID_DATA_TYPE);
-}
-
-#[test]
-fn test_none_variable_as_group() -> Result<(), Box<dyn std::error::Error>> {
-    let mut in_memory_backend = InMemoryBackend::new(vec![]);
-    let mut file_writer = OmFileWriter::new(in_memory_backend.borrow_mut(), 8);
-
-    // Write a regular variable
-    let int_var = file_writer.write_scalar(42i32, "attribute", &[])?;
-    // Write a None type to indicate some type of group
-    let group_var = file_writer.write_none("group", &[int_var])?;
-
-    file_writer.write_trailer(group_var)?;
-    drop(file_writer);
-
-    // Read the file
-    let read = OmFileReader::new(Arc::new(in_memory_backend))?;
-
-    // Verify the group variable
-    assert_eq!(read.get_name().unwrap(), "group");
-    assert_eq!(read.data_type(), DataType::None);
-
-    // Get the child variable, which is an attribute
-    let child = read.get_child(0).unwrap();
-    assert_eq!(child.get_name().unwrap(), "attribute");
-    assert_eq!(child.data_type(), DataType::Int32);
-    assert_eq!(child.read_scalar::<i32>().unwrap(), 42);
-
-    Ok(())
-}
-
-#[test]
 fn test_in_memory_int_compression() -> Result<(), Box<dyn std::error::Error>> {
     let data: Vec<f32> = vec![
         0.0, 5.0, 2.0, 3.0, 2.0, 5.0, 6.0, 2.0, 8.0, 3.0, 10.0, 14.0, 12.0, 15.0, 14.0, 15.0, 66.0,
@@ -299,7 +82,7 @@ fn test_in_memory_int_compression() -> Result<(), Box<dyn std::error::Error>> {
     let mut file_writer = OmFileWriter::new(in_memory_backend.borrow_mut(), 8);
 
     let mut writer = file_writer
-        .prepare_array::<f32>(shape, chunks, CompressionType::PforDelta2dInt16, 1.0, 0.0)
+        .prepare_array::<f32>(shape, chunks, OmCompressionType::PforDelta2dInt16, 1.0, 0.0)
         .expect("Could not prepare writer");
 
     writer.write_data(data.view(), None, None)?;
@@ -310,7 +93,9 @@ fn test_in_memory_int_compression() -> Result<(), Box<dyn std::error::Error>> {
 
     assert_eq!(in_memory_backend.count(), 136);
     let read = OmFileReader::new(Arc::new(in_memory_backend))?;
-    let uncompressed = read.read::<f32>(&[0u64..1, 0..data.len() as u64], None, None)?;
+    let uncompressed = read
+        .expect_array()?
+        .read::<f32>(&[0u64..1, 0..data.len() as u64])?;
 
     assert_eq!(&must_equal, &uncompressed);
 
@@ -332,7 +117,7 @@ fn test_in_memory_f32_compression() -> Result<(), Box<dyn std::error::Error>> {
     let mut file_writer = OmFileWriter::new(in_memory_backend.borrow_mut(), 8);
 
     let mut writer = file_writer
-        .prepare_array::<f32>(shape, chunks, CompressionType::FpxXor2d, 1.0, 0.0)
+        .prepare_array::<f32>(shape, chunks, OmCompressionType::FpxXor2d, 1.0, 0.0)
         .expect("Could not prepare writer");
 
     writer.write_data(data.view(), None, None)?;
@@ -343,7 +128,9 @@ fn test_in_memory_f32_compression() -> Result<(), Box<dyn std::error::Error>> {
 
     assert_eq!(in_memory_backend.count(), 160);
     let read = OmFileReader::new(Arc::new(in_memory_backend))?;
-    let uncompressed = read.read::<f32>(&[0u64..1, 0..data.len() as u64], None, None)?;
+    let uncompressed = read
+        .expect_array()?
+        .read::<f32>(&[0u64..1, 0..data.len() as u64])?;
 
     assert_eq!(&must_equal, &uncompressed);
 
@@ -357,7 +144,7 @@ fn test_write_more_data_than_expected() -> Result<(), Box<dyn std::error::Error>
     let mut writer = file_writer.prepare_array::<f32>(
         vec![5, 5],
         vec![2, 2],
-        CompressionType::PforDelta2dInt16,
+        OmCompressionType::PforDelta2dInt16,
         1.0,
         0.0,
     )?;
@@ -368,7 +155,7 @@ fn test_write_more_data_than_expected() -> Result<(), Box<dyn std::error::Error>
     let result = writer.write_data(too_much_data.view(), None, None);
     assert!(result.is_err());
     let err = result.err().unwrap();
-    assert_eq!(err, OmFilesRsError::ChunkHasWrongNumberOfElements);
+    assert_eq!(err, OmFilesError::ChunkHasWrongNumberOfElements);
 
     Ok(())
 }
@@ -381,7 +168,7 @@ fn test_write_large() -> Result<(), Box<dyn std::error::Error>> {
     // Set up the writer with the specified dimensions and chunk dimensions
     let dims = vec![100, 100, 10];
     let chunk_dimensions = vec![2, 2, 2];
-    let compression = CompressionType::PforDelta2dInt16;
+    let compression = OmCompressionType::PforDelta2dInt16;
     let scale_factor = 1.0;
     let add_offset = 0.0;
 
@@ -409,14 +196,13 @@ fn test_write_large() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
-        let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let read = OmFileReader::new(Arc::new(read_backend))?;
+        let read = OmFileReader::from_file(file)?;
+        let read = read.expect_array()?;
 
-        let a1 = read.read::<f32>(&[50..51, 20..21, 1..2], None, None)?;
+        let a1 = read.read::<f32>(&[50..51, 20..21, 1..2])?;
         assert_eq!(a1.as_slice().unwrap(), &vec![201.0]);
 
-        let a = read.read::<f32>(&[0..100, 0..100, 0..10], None, None)?;
+        let a = read.read::<f32>(&[0..100, 0..100, 0..10])?;
         assert_eq!(a.len(), data.len());
         let range = s![0..100, 0..1, 0..1];
         assert_eq!(a.slice(range), data.slice(range));
@@ -434,7 +220,7 @@ fn test_write_chunks() -> Result<(), Box<dyn std::error::Error>> {
     // Set up the writer with the specified dimensions and chunk dimensions
     let dims = vec![5, 5];
     let chunk_dimensions = vec![2, 2];
-    let compression = CompressionType::PforDelta2dInt16;
+    let compression = OmCompressionType::PforDelta2dInt16;
     let scale_factor = 1.0;
     let add_offset = 0.0;
 
@@ -489,13 +275,11 @@ fn test_write_chunks() -> Result<(), Box<dyn std::error::Error>> {
     {
         // test reading
         let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-
-        let backend = Arc::new(read_backend);
-
+        let backend = Arc::new(MmapFile::new(file_for_reading, FileAccessMode::ReadOnly)?);
         let read = OmFileReader::new(backend.clone())?;
+        let read = read.expect_array()?;
 
-        let a = read.read::<f32>(&[0..5, 0..5], None, None)?;
+        let a = read.read::<f32>(&[0..5, 0..5])?;
         let expected = ArrayD::from_shape_vec(
             vec![5, 5],
             vec![
@@ -549,7 +333,7 @@ fn test_offset_write() -> Result<(), Box<dyn std::error::Error>> {
     // Set up the writer with the specified dimensions and chunk dimensions
     let dims = vec![5, 5];
     let chunk_dimensions = vec![2, 2];
-    let compression = CompressionType::PforDelta2dInt16;
+    let compression = OmCompressionType::PforDelta2dInt16;
     let scale_factor = 1.0;
     let add_offset = 0.0;
 
@@ -632,11 +416,11 @@ fn test_offset_write() -> Result<(), Box<dyn std::error::Error>> {
     {
         // Read the file
         let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let read = OmFileReader::new(Arc::new(read_backend))?;
+        let read = OmFileReader::from_file_handle(file_for_reading)?;
+        let read = read.expect_array()?;
 
         // Read the data
-        let a = read.read::<f32>(&[0..5, 0..5], None, None)?;
+        let a = read.read::<f32>(&[0..5, 0..5])?;
 
         // Expected data
         let expected = ArrayD::from_shape_vec(
@@ -662,7 +446,7 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
 
     let dims = vec![3, 3, 3];
     let chunk_dimensions = vec![2, 2, 2];
-    let compression = CompressionType::PforDelta2dInt16;
+    let compression = OmCompressionType::PforDelta2dInt16;
     let scale_factor = 1.0;
     let add_offset = 0.0;
 
@@ -701,30 +485,33 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
     {
         // Read the file
         let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let backend = Arc::new(read_backend);
+        let backend = Arc::new(MmapFile::new(file_for_reading, FileAccessMode::ReadOnly)?);
         let read = OmFileReader::new(backend.clone())?;
 
         assert_eq!(read.number_of_children(), 2);
 
         let child = read.get_child(0).unwrap();
+        let child = child.expect_scalar()?;
         assert_eq!(child.read_scalar::<i32>().unwrap(), 12323154i32);
         assert_eq!(child.get_name().unwrap(), "int32");
 
         let child2 = read.get_child(1).unwrap();
+        let child2 = child2.expect_scalar()?;
         assert_eq!(child2.read_scalar::<f64>().unwrap(), 12323154f64);
         assert_eq!(child2.get_name().unwrap(), "double");
 
         assert!(read.get_child(2).is_none());
 
-        let a = read.read::<f32>(&[0..3, 0..3, 0..3], None, None)?;
+        let read = read.expect_array()?;
+
+        let a = read.read::<f32>(&[0..3, 0..3, 0..3])?;
         assert_eq!(a, data);
 
         // Single index checks
         for x in 0..dims[0] {
             for y in 0..dims[1] {
                 for z in 0..dims[2] {
-                    let value = read.read::<f32>(&[x..x + 1, y..y + 1, z..z + 1], None, None)?;
+                    let value = read.read::<f32>(&[x..x + 1, y..y + 1, z..z + 1])?;
                     let expected =
                         ArrayD::from_shape_vec(vec![1, 1, 1], vec![(x * 9 + y * 3 + z) as f32])
                             .unwrap();
@@ -811,7 +598,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         let mut subchild_writer = file_writer.prepare_array::<f32>(
             subchild_dims.clone(),
             subchild_chunks.clone(),
-            CompressionType::PforDelta2dInt16,
+            OmCompressionType::PforDelta2dInt16,
             1.0,
             0.0,
         )?;
@@ -836,7 +623,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         let mut child1_writer = file_writer.prepare_array::<f32>(
             child_dims.clone(),
             child_chunks.clone(),
-            CompressionType::PforDelta2dInt16,
+            OmCompressionType::PforDelta2dInt16,
             1.0,
             0.0,
         )?;
@@ -846,7 +633,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         let mut child2_writer = file_writer.prepare_array::<f32>(
             child_dims.clone(),
             child_chunks.clone(),
-            CompressionType::PforDelta2dInt16,
+            OmCompressionType::PforDelta2dInt16,
             1.0,
             0.0,
         )?;
@@ -857,7 +644,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         let mut parent_writer = file_writer.prepare_array::<f32>(
             parent_dims,
             parent_chunks,
-            CompressionType::PforDelta2dInt16,
+            OmCompressionType::PforDelta2dInt16,
             1.0,
             0.0,
         )?;
@@ -888,9 +675,8 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         // Verify the hierarchical structure
-        let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let reader = OmFileReader::new(Arc::new(read_backend))?;
+        let reader = OmFileReader::from_file(file)?;
+        let reader = reader.expect_array()?;
 
         let all_children_meta = reader.get_flat_variable_metadata();
         let expected_metadata = [
@@ -909,7 +695,9 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(all_children_meta, expected_metadata);
 
         // Check parent data
-        let parent = reader.read::<f32>(&[0..3, 0..3], None, None)?;
+        // Check number of children at root level
+        assert_eq!(reader.number_of_children(), 5);
+        let parent = reader.read::<f32>(&[0..3, 0..3])?;
         let expected_parent = ArrayD::from_shape_vec(
             vec![3, 3],
             vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
@@ -917,13 +705,12 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap();
         assert_eq!(parent, expected_parent);
 
-        // Check number of children at root level
-        assert_eq!(reader.number_of_children(), 5);
+        // let reader = parent_reader.into_generic_reader();
 
         // Check child1 data and its subchild
         let child1 = reader.get_child(0).unwrap();
         assert_eq!(child1.get_name().unwrap(), "child1");
-        let child1_data = child1.read::<f32>(&[0..2, 0..2], None, None)?;
+        let child1_data = child1.expect_array()?.read::<f32>(&[0..2, 0..2])?;
         let expected_child1 =
             ArrayD::from_shape_vec(vec![2, 2], vec![10.0, 11.0, 12.0, 13.0]).unwrap();
         assert_eq!(child1_data, expected_child1);
@@ -932,7 +719,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(child1.number_of_children(), 1);
         let subchild = child1.get_child(0).unwrap();
         assert_eq!(subchild.get_name().unwrap(), "subchild");
-        let subchild_data = subchild.read::<f32>(&[0..4, 0..500], None, None)?;
+        let subchild_data = subchild.expect_array()?.read::<f32>(&[0..4, 0..500])?;
         let expected_subchild = ArrayD::from_shape_vec(
             vec![4, 500],
             vec![(30..2030).map(|x| x as f32).collect::<Vec<f32>>()].concat(),
@@ -944,7 +731,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         let child2 = reader.get_child(1).unwrap();
         assert_eq!(child2.get_name().unwrap(), "child2");
         assert_eq!(child2.number_of_children(), 0);
-        let child2_data = child2.read::<f32>(&[0..2, 0..2], None, None)?;
+        let child2_data = child2.expect_array()?.read::<f32>(&[0..2, 0..2])?;
         let expected_child2 =
             ArrayD::from_shape_vec(vec![2, 2], vec![20.0, 21.0, 22.0, 23.0]).unwrap();
         assert_eq!(child2_data, expected_child2);
@@ -952,15 +739,24 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         // Check attributes
         let int32 = reader.get_child(2).unwrap();
         assert_eq!(int32.get_name().unwrap(), "int32");
-        assert_eq!(int32.read_scalar::<i32>().unwrap(), 12323154i32);
+        assert_eq!(
+            int32.expect_scalar()?.read_scalar::<i32>().unwrap(),
+            12323154i32
+        );
 
         let double = reader.get_child(3).unwrap();
         assert_eq!(double.get_name().unwrap(), "double");
-        assert_eq!(double.read_scalar::<f64>().unwrap(), 12323154f64);
+        assert_eq!(
+            double.expect_scalar()?.read_scalar::<f64>().unwrap(),
+            12323154f64
+        );
 
         let string = reader.get_child(4).unwrap();
         assert_eq!(string.get_name().unwrap(), "string");
-        assert_eq!(string.read_scalar::<String>().unwrap(), "hello");
+        assert_eq!(
+            string.expect_scalar()?.read_scalar::<String>().unwrap(),
+            "hello"
+        );
     }
 
     remove_file_if_exists(file);
@@ -974,7 +770,7 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
 
     let dims = vec![5, 5];
     let chunk_dimensions = vec![2, 2];
-    let compression = CompressionType::PforDelta2dInt16;
+    let compression = OmCompressionType::PforDelta2dInt16;
     let scale_factor = 1.0;
     let add_offset = 0.0;
 
@@ -988,7 +784,7 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
         let mut writer = file_writer
             .prepare_array::<f32>(
                 dims.clone(),
-                chunk_dimensions,
+                chunk_dimensions.clone(),
                 compression,
                 scale_factor,
                 add_offset,
@@ -1005,19 +801,25 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
     {
         // Open file for reading
         let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let backend = Arc::new(read_backend);
+        let backend = Arc::new(MmapFile::new(file_for_reading, FileAccessMode::ReadOnly)?);
         let read = OmFileReader::new(backend.clone())?;
+        let read = read.expect_array()?;
+        // Test array properties
+        assert_eq!(read.get_dimensions(), dims);
+        assert_eq!(read.get_chunk_dimensions(), chunk_dimensions);
+        assert_eq!(read.add_offset(), add_offset);
+        assert_eq!(read.scale_factor(), scale_factor);
+        assert_eq!(read.compression(), OmCompressionType::PforDelta2dInt16);
 
         // Rest of test remains the same but using read.read::<f32>() instead of read_var.read()
-        let a = read.read::<f32>(&[0..5, 0..5], None, None)?;
+        let a = read.read::<f32>(&[0..5, 0..5])?;
         let expected = data.clone();
         assert_eq!(a, expected);
 
         // Single index checks
         for x in 0..5 {
             for y in 0..5 {
-                let value = read.read::<f32>(&[x..x + 1, y..y + 1], None, None)?;
+                let value = read.read::<f32>(&[x..x + 1, y..y + 1])?;
                 let expected =
                     ArrayD::from_shape_vec(vec![1, 1], vec![(x * 5 + y) as f32]).unwrap();
                 assert_eq!(value, expected);
@@ -1028,14 +830,7 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
         for x in 0..5 {
             for y in 0..5 {
                 let mut r = ArrayD::from_elem(vec![3, 3], f32::NAN);
-                read.read_into(
-                    &mut r,
-                    &[x..x + 1, y..y + 1],
-                    &[1, 1],
-                    &[3, 3],
-                    Some(0),
-                    Some(0),
-                )?;
+                read.read_into(&mut r, &[x..x + 1, y..y + 1], &[1, 1], &[3, 3])?;
                 let expected = ArrayD::from_shape_vec(
                     vec![3, 3],
                     vec![
@@ -1059,7 +854,7 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
         // 2x in fast dimension
         for x in 0..5 {
             for y in 0..4 {
-                let value = read.read::<f32>(&[x..x + 1, y..y + 2], None, None)?;
+                let value = read.read::<f32>(&[x..x + 1, y..y + 2])?;
                 let expected = ArrayD::from_shape_vec(
                     vec![1, 2],
                     vec![(x * 5 + y) as f32, (x * 5 + y + 1) as f32],
@@ -1072,7 +867,7 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
         // 2x in slow dimension
         for x in 0..4 {
             for y in 0..5 {
-                let value = read.read::<f32>(&[x..x + 2, y..y + 1], None, None)?;
+                let value = read.read::<f32>(&[x..x + 2, y..y + 1])?;
                 let expected = ArrayD::from_shape_vec(
                     vec![2, 1],
                     vec![(x * 5 + y) as f32, ((x + 1) * 5 + y) as f32],
@@ -1085,7 +880,7 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
         // 2x2 regions
         for x in 0..4 {
             for y in 0..4 {
-                let value = read.read::<f32>(&[x..x + 2, y..y + 2], None, None)?;
+                let value = read.read::<f32>(&[x..x + 2, y..y + 2])?;
                 let expected = ArrayD::from_shape_vec(
                     vec![2, 2],
                     vec![
@@ -1103,7 +898,7 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
         // 3x3 regions
         for x in 0..3 {
             for y in 0..3 {
-                let value = read.read::<f32>(&[x..x + 3, y..y + 3], None, None)?;
+                let value = read.read::<f32>(&[x..x + 3, y..y + 3])?;
                 let expected = ArrayD::from_shape_vec(
                     vec![3, 3],
                     vec![
@@ -1125,7 +920,7 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
 
         // 1x5 regions
         for x in 0..5 {
-            let value = read.read::<f32>(&[x..x + 1, 0..5], None, None)?;
+            let value = read.read::<f32>(&[x..x + 1, 0..5])?;
             let expected = ArrayD::from_shape_vec(
                 vec![1, 5],
                 vec![
@@ -1142,7 +937,7 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
 
         // 5x1 regions
         for x in 0..5 {
-            let value = read.read::<f32>(&[0..5, x..x + 1], None, None)?;
+            let value = read.read::<f32>(&[0..5, x..x + 1])?;
             let expected = ArrayD::from_shape_vec(
                 vec![5, 1],
                 vec![
@@ -1184,7 +979,7 @@ fn test_write_v3_max_io_limit() -> Result<(), Box<dyn std::error::Error>> {
     // Define dimensions and writer parameters
     let dims = vec![5, 5];
     let chunk_dimensions = vec![2, 2];
-    let compression = CompressionType::PforDelta2dInt16;
+    let compression = OmCompressionType::PforDelta2dInt16;
     let scale_factor = 1.0;
     let add_offset = 0.0;
     // Define the data to write
@@ -1218,21 +1013,19 @@ fn test_write_v3_max_io_limit() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
-        // Open the file for reading
-        let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
         // Initialize the reader using the open_file method
-        let read = OmFileReader::new(Arc::new(read_backend))?;
+        let read = OmFileReader::from_file(file)?;
+        let read = read.expect_array()?;
 
         // Read with io_size_max: 0, io_size_merge: 0
-        let a = read.read::<f32>(&[0..5, 0..5], Some(0), Some(0))?;
+        let a = read.read::<f32>(&[0..5, 0..5])?;
         let expected = data.clone();
         assert_eq!(a, expected);
 
         // Single index checks
         for x in 0..dims[0] {
             for y in 0..dims[1] {
-                let value = read.read::<f32>(&[x..x + 1, y..y + 1], Some(0), Some(0))?;
+                let value = read.read::<f32>(&[x..x + 1, y..y + 1])?;
                 assert_eq!(*value.first().unwrap(), (x * 5 + y) as f32);
             }
         }
@@ -1257,7 +1050,7 @@ fn test_nan() -> Result<(), Box<dyn std::error::Error>> {
         let mut writer = file_writer.prepare_array::<f32>(
             shape,
             chunks,
-            CompressionType::PforDelta2dInt16,
+            OmCompressionType::PforDelta2dInt16,
             1.0,
             0.0,
         )?;
@@ -1270,12 +1063,11 @@ fn test_nan() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         // Read the data back
-        let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
-        let reader = OmFileReader::new(Arc::new(read_backend))?;
+        let reader = OmFileReader::from_file(file)?;
+        let reader = reader.expect_array()?;
 
         // Assert that all values in the specified range are NaN
-        let values = reader.read::<f32>(&[1..2, 1..2], None, None)?;
+        let values = reader.read::<f32>(&[1..2, 1..2])?;
         assert!(values.iter().all(|x| x.is_nan()));
     }
 
@@ -1299,21 +1091,12 @@ async fn test_opening_legacy_file() -> Result<(), Box<dyn std::error::Error>> {
     let result = OmFileReader::<MmapFile>::from_file(file);
     assert!(result.is_ok());
     let reader = result.unwrap();
-    assert_eq!(reader.compression(), CompressionType::PforDelta2dInt16);
-    assert_eq!(reader.get_dimensions(), [0u64, 0u64]);
-    assert_eq!(reader.get_chunk_dimensions(), [0u64, 0u64]);
     assert_eq!(reader.get_name(), None);
 
     // Try to open the legacy file and check properties of the reader with async reader
     let file_for_reading = File::open(file)?;
-    let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
+    let read_backend = MmapFile::new(file_for_reading, FileAccessMode::ReadOnly)?;
     let async_reader = OmFileReaderAsync::new(Arc::new(read_backend)).await?;
-    assert_eq!(
-        async_reader.compression(),
-        CompressionType::PforDelta2dInt16
-    );
-    assert_eq!(async_reader.get_dimensions(), [0u64, 0u64]);
-    assert_eq!(async_reader.get_chunk_dimensions(), [0u64, 0u64]);
     assert_eq!(async_reader.get_name(), None);
 
     // Clean up
@@ -1329,7 +1112,7 @@ async fn test_read_async() -> Result<(), Box<dyn std::error::Error>> {
 
     let dims = vec![10, 10, 10]; // 3D data
     let chunk_dimensions = vec![4, 4, 4];
-    let compression = CompressionType::PforDelta2dInt16;
+    let compression = OmCompressionType::PforDelta2dInt16;
     let scale_factor = 1.0;
     let add_offset = 0.0;
 
@@ -1362,31 +1145,17 @@ async fn test_read_async() -> Result<(), Box<dyn std::error::Error>> {
     // Test async read functionality
     {
         let file_for_reading = File::open(file)?;
-        let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly)?;
+        let read_backend = MmapFile::new(file_for_reading, FileAccessMode::ReadOnly)?;
         let async_reader = OmFileReaderAsync::new(Arc::new(read_backend)).await?;
+        let async_reader = async_reader.expect_array()?;
 
-        let async_data = async_reader
-            .read::<f32>(&[0..10, 0..10, 0..10], None, None)
-            .await?;
+        let async_data = async_reader.read::<f32>(&[0..10, 0..10, 0..10]).await?;
 
         assert_eq!(data, async_data);
 
         // Test 2: Read partial data
-        let partial_async = async_reader
-            .read::<f32>(&[2..5, 3..7, 1..3], None, None)
-            .await?;
+        let partial_async = async_reader.read::<f32>(&[2..5, 3..7, 1..3]).await?;
         assert_eq!(data.slice(s![2..5, 3..7, 1..3]).into_dyn(), partial_async);
-
-        // Test 4: Test with different IO size parameters
-        let small_io = async_reader
-            .read::<f32>(&[0..10, 0..10, 0..10], Some(128), Some(32))
-            .await?;
-        let large_io = async_reader
-            .read::<f32>(&[0..10, 0..10, 0..10], Some(65536), Some(1024))
-            .await?;
-
-        assert_eq!(small_io, large_io);
-        assert_eq!(small_io, data);
     }
 
     // Clean up
