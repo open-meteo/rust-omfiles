@@ -2,15 +2,15 @@ use macro_rules_attribute::apply;
 use ndarray::{Array2, ArrayD, ArrayViewD, s};
 use om_file_format_sys::{fpxdec32, fpxenc32};
 use omfiles::{
+    OmCompressionType, OmFilesError, OmOffsetSize,
     backends::{
         memory::InMemoryBackend,
         mmapfile::{MmapFile, Mode},
     },
-    core::compression::CompressionType,
-    errors::OmFilesError,
-    io::variable::OmOffsetSize,
-    io::{reader::OmFileReader, reader_async::OmFileReaderAsync, writer::OmFileWriter},
+    reader::OmFileReader,
+    reader_async::OmFileReaderAsync,
     traits::{OmFileReadable, OmFileReaderBackend, OmFileVariable, ScalarOmVariable},
+    writer::OmFileWriter,
 };
 use smol_macros::test;
 use std::{
@@ -84,7 +84,7 @@ fn test_in_memory_int_compression() -> Result<(), Box<dyn std::error::Error>> {
     let mut file_writer = OmFileWriter::new(in_memory_backend.borrow_mut(), 8);
 
     let mut writer = file_writer
-        .prepare_array::<f32>(shape, chunks, CompressionType::PforDelta2dInt16, 1.0, 0.0)
+        .prepare_array::<f32>(shape, chunks, OmCompressionType::PforDelta2dInt16, 1.0, 0.0)
         .expect("Could not prepare writer");
 
     writer.write_data(data.view(), None, None)?;
@@ -117,7 +117,7 @@ fn test_in_memory_f32_compression() -> Result<(), Box<dyn std::error::Error>> {
     let mut file_writer = OmFileWriter::new(in_memory_backend.borrow_mut(), 8);
 
     let mut writer = file_writer
-        .prepare_array::<f32>(shape, chunks, CompressionType::FpxXor2d, 1.0, 0.0)
+        .prepare_array::<f32>(shape, chunks, OmCompressionType::FpxXor2d, 1.0, 0.0)
         .expect("Could not prepare writer");
 
     writer.write_data(data.view(), None, None)?;
@@ -142,7 +142,7 @@ fn test_write_more_data_than_expected() -> Result<(), Box<dyn std::error::Error>
     let mut writer = file_writer.prepare_array::<f32>(
         vec![5, 5],
         vec![2, 2],
-        CompressionType::PforDelta2dInt16,
+        OmCompressionType::PforDelta2dInt16,
         1.0,
         0.0,
     )?;
@@ -166,7 +166,7 @@ fn test_write_large() -> Result<(), Box<dyn std::error::Error>> {
     // Set up the writer with the specified dimensions and chunk dimensions
     let dims = vec![100, 100, 10];
     let chunk_dimensions = vec![2, 2, 2];
-    let compression = CompressionType::PforDelta2dInt16;
+    let compression = OmCompressionType::PforDelta2dInt16;
     let scale_factor = 1.0;
     let add_offset = 0.0;
 
@@ -219,7 +219,7 @@ fn test_write_chunks() -> Result<(), Box<dyn std::error::Error>> {
     // Set up the writer with the specified dimensions and chunk dimensions
     let dims = vec![5, 5];
     let chunk_dimensions = vec![2, 2];
-    let compression = CompressionType::PforDelta2dInt16;
+    let compression = OmCompressionType::PforDelta2dInt16;
     let scale_factor = 1.0;
     let add_offset = 0.0;
 
@@ -334,7 +334,7 @@ fn test_offset_write() -> Result<(), Box<dyn std::error::Error>> {
     // Set up the writer with the specified dimensions and chunk dimensions
     let dims = vec![5, 5];
     let chunk_dimensions = vec![2, 2];
-    let compression = CompressionType::PforDelta2dInt16;
+    let compression = OmCompressionType::PforDelta2dInt16;
     let scale_factor = 1.0;
     let add_offset = 0.0;
 
@@ -447,7 +447,7 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
 
     let dims = vec![3, 3, 3];
     let chunk_dimensions = vec![2, 2, 2];
-    let compression = CompressionType::PforDelta2dInt16;
+    let compression = OmCompressionType::PforDelta2dInt16;
     let scale_factor = 1.0;
     let add_offset = 0.0;
 
@@ -598,7 +598,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         let mut subchild_writer = file_writer.prepare_array::<f32>(
             subchild_dims.clone(),
             subchild_chunks.clone(),
-            CompressionType::PforDelta2dInt16,
+            OmCompressionType::PforDelta2dInt16,
             1.0,
             0.0,
         )?;
@@ -623,7 +623,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         let mut child1_writer = file_writer.prepare_array::<f32>(
             child_dims.clone(),
             child_chunks.clone(),
-            CompressionType::PforDelta2dInt16,
+            OmCompressionType::PforDelta2dInt16,
             1.0,
             0.0,
         )?;
@@ -633,7 +633,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         let mut child2_writer = file_writer.prepare_array::<f32>(
             child_dims.clone(),
             child_chunks.clone(),
-            CompressionType::PforDelta2dInt16,
+            OmCompressionType::PforDelta2dInt16,
             1.0,
             0.0,
         )?;
@@ -644,7 +644,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         let mut parent_writer = file_writer.prepare_array::<f32>(
             parent_dims,
             parent_chunks,
-            CompressionType::PforDelta2dInt16,
+            OmCompressionType::PforDelta2dInt16,
             1.0,
             0.0,
         )?;
@@ -762,7 +762,7 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
 
     let dims = vec![5, 5];
     let chunk_dimensions = vec![2, 2];
-    let compression = CompressionType::PforDelta2dInt16;
+    let compression = OmCompressionType::PforDelta2dInt16;
     let scale_factor = 1.0;
     let add_offset = 0.0;
 
@@ -965,7 +965,7 @@ fn test_write_v3_max_io_limit() -> Result<(), Box<dyn std::error::Error>> {
     // Define dimensions and writer parameters
     let dims = vec![5, 5];
     let chunk_dimensions = vec![2, 2];
-    let compression = CompressionType::PforDelta2dInt16;
+    let compression = OmCompressionType::PforDelta2dInt16;
     let scale_factor = 1.0;
     let add_offset = 0.0;
     // Define the data to write
@@ -1038,7 +1038,7 @@ fn test_nan() -> Result<(), Box<dyn std::error::Error>> {
         let mut writer = file_writer.prepare_array::<f32>(
             shape,
             chunks,
-            CompressionType::PforDelta2dInt16,
+            OmCompressionType::PforDelta2dInt16,
             1.0,
             0.0,
         )?;
@@ -1101,7 +1101,7 @@ async fn test_read_async() -> Result<(), Box<dyn std::error::Error>> {
 
     let dims = vec![10, 10, 10]; // 3D data
     let chunk_dimensions = vec![4, 4, 4];
-    let compression = CompressionType::PforDelta2dInt16;
+    let compression = OmCompressionType::PforDelta2dInt16;
     let scale_factor = 1.0;
     let add_offset = 0.0;
 

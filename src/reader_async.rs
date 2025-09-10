@@ -7,13 +7,13 @@
 
 use crate::core::data_types::OmFileArrayDataType;
 use crate::errors::OmFilesError;
-use crate::io::reader::OmFileScalar;
-use crate::io::reader_utils::process_trailer;
-use crate::io::variable::OmVariableContainer;
+use crate::reader::OmFileScalar;
 use crate::traits::{
     ArrayOmVariable, ArrayOmVariableImpl, OmFileReaderBackendAsync, OmFileVariable,
     OmFileVariableImpl,
 };
+use crate::utils::reader_utils::process_trailer;
+use crate::variable::OmVariableContainer;
 use async_executor::{Executor, Task};
 use async_lock::Semaphore;
 use ndarray::ArrayD;

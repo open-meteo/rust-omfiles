@@ -1,9 +1,10 @@
 use crate::errors::OmFilesError;
 use om_file_format_sys::OmCompression_t;
 
+/// Compression types supported in OmFiles.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
-pub enum CompressionType {
+pub enum OmCompressionType {
     /// Lossy compression using 2D delta coding and scale-factor.
     /// Only supports float and scales to 16-bit signed integer.
     PforDelta2dInt16 = 0,
@@ -17,22 +18,22 @@ pub enum CompressionType {
     None = 4,
 }
 
-impl CompressionType {
+impl OmCompressionType {
     pub(crate) fn to_c(&self) -> OmCompression_t {
         unsafe { std::mem::transmute(*self as u32) }
     }
 }
 
-impl TryFrom<u8> for CompressionType {
+impl TryFrom<u8> for OmCompressionType {
     type Error = OmFilesError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(CompressionType::PforDelta2dInt16),
-            1 => Ok(CompressionType::FpxXor2d),
-            2 => Ok(CompressionType::PforDelta2d),
-            3 => Ok(CompressionType::PforDelta2dInt16Logarithmic),
-            4 => Ok(CompressionType::None),
+            0 => Ok(OmCompressionType::PforDelta2dInt16),
+            1 => Ok(OmCompressionType::FpxXor2d),
+            2 => Ok(OmCompressionType::PforDelta2d),
+            3 => Ok(OmCompressionType::PforDelta2dInt16Logarithmic),
+            4 => Ok(OmCompressionType::None),
             _ => Err(OmFilesError::InvalidCompressionType),
         }
     }

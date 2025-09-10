@@ -3,22 +3,20 @@
 //! This library provides functionality for reading and writing OM file format.
 //!
 
+pub mod reader;
+pub mod reader_async;
 pub mod traits;
-pub mod io {
-    pub(crate) mod buffered_writer;
-    pub mod reader;
-    pub mod reader_async;
-    pub(crate) mod reader_utils;
-    pub mod variable;
-    pub(crate) mod wrapped_decoder;
-    pub mod writer;
-}
+mod variable;
+pub use variable::OmOffsetSize;
+pub mod writer;
 
-pub mod core {
+mod core {
     pub(crate) mod c_defaults;
     pub mod compression;
     pub mod data_types;
 }
+pub use core::compression::OmCompressionType;
+pub use core::data_types::OmDataType;
 
 pub mod backends {
     pub mod file;
@@ -26,6 +24,12 @@ pub mod backends {
     pub mod mmapfile;
 }
 
-pub mod errors;
+mod errors;
+pub use errors::OmFilesError;
 
-mod utils;
+pub(crate) mod utils {
+    pub mod buffered_writer;
+    pub mod math;
+    pub mod reader_utils;
+    pub mod wrapped_decoder;
+}

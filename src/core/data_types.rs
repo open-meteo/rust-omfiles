@@ -3,9 +3,10 @@ use std::mem;
 
 use om_file_format_sys::OmDataType_t;
 
+/// Data types supported in OmFiles.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
-pub enum DataType {
+pub enum OmDataType {
     None = 0,
     Int8 = 1,
     Uint8 = 2,
@@ -31,7 +32,7 @@ pub enum DataType {
     StringArray = 22,
 }
 
-impl DataType {
+impl OmDataType {
     pub(crate) fn to_c(&self) -> OmDataType_t {
         unsafe { std::mem::transmute(*self as u32) }
     }
@@ -39,16 +40,16 @@ impl DataType {
     /// Check if the data type is an array type.
     pub fn is_array(&self) -> bool {
         match self {
-            DataType::Int8Array
-            | DataType::Uint8Array
-            | DataType::Int16Array
-            | DataType::Uint16Array
-            | DataType::Int32Array
-            | DataType::Uint32Array
-            | DataType::Int64Array
-            | DataType::Uint64Array
-            | DataType::FloatArray
-            | DataType::DoubleArray => true,
+            OmDataType::Int8Array
+            | OmDataType::Uint8Array
+            | OmDataType::Int16Array
+            | OmDataType::Uint16Array
+            | OmDataType::Int32Array
+            | OmDataType::Uint32Array
+            | OmDataType::Int64Array
+            | OmDataType::Uint64Array
+            | OmDataType::FloatArray
+            | OmDataType::DoubleArray => true,
             _ => false,
         }
     }
@@ -56,17 +57,17 @@ impl DataType {
     /// Check if the data type is a scalar type.
     pub fn is_scalar(&self) -> bool {
         match self {
-            DataType::Int8
-            | DataType::Uint8
-            | DataType::Int16
-            | DataType::Uint16
-            | DataType::Int32
-            | DataType::Uint32
-            | DataType::Int64
-            | DataType::Uint64
-            | DataType::Float
-            | DataType::Double
-            | DataType::String => true,
+            OmDataType::Int8
+            | OmDataType::Uint8
+            | OmDataType::Int16
+            | OmDataType::Uint16
+            | OmDataType::Int32
+            | OmDataType::Uint32
+            | OmDataType::Int64
+            | OmDataType::Uint64
+            | OmDataType::Float
+            | OmDataType::Double
+            | OmDataType::String => true,
             _ => false,
         }
     }
@@ -74,40 +75,40 @@ impl DataType {
     /// Check if the data type is a group.
     pub fn is_group(&self) -> bool {
         match self {
-            DataType::None => true,
+            OmDataType::None => true,
             _ => false,
         }
     }
 }
 
-impl TryFrom<u8> for DataType {
+impl TryFrom<u8> for OmDataType {
     type Error = &'static str;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(DataType::None),
-            1 => Ok(DataType::Int8),
-            2 => Ok(DataType::Uint8),
-            3 => Ok(DataType::Int16),
-            4 => Ok(DataType::Uint16),
-            5 => Ok(DataType::Int32),
-            6 => Ok(DataType::Uint32),
-            7 => Ok(DataType::Int64),
-            8 => Ok(DataType::Uint64),
-            9 => Ok(DataType::Float),
-            10 => Ok(DataType::Double),
-            11 => Ok(DataType::String),
-            12 => Ok(DataType::Int8Array),
-            13 => Ok(DataType::Uint8Array),
-            14 => Ok(DataType::Int16Array),
-            15 => Ok(DataType::Uint16Array),
-            16 => Ok(DataType::Int32Array),
-            17 => Ok(DataType::Uint32Array),
-            18 => Ok(DataType::Int64Array),
-            19 => Ok(DataType::Uint64Array),
-            20 => Ok(DataType::FloatArray),
-            21 => Ok(DataType::DoubleArray),
-            22 => Ok(DataType::StringArray),
+            0 => Ok(OmDataType::None),
+            1 => Ok(OmDataType::Int8),
+            2 => Ok(OmDataType::Uint8),
+            3 => Ok(OmDataType::Int16),
+            4 => Ok(OmDataType::Uint16),
+            5 => Ok(OmDataType::Int32),
+            6 => Ok(OmDataType::Uint32),
+            7 => Ok(OmDataType::Int64),
+            8 => Ok(OmDataType::Uint64),
+            9 => Ok(OmDataType::Float),
+            10 => Ok(OmDataType::Double),
+            11 => Ok(OmDataType::String),
+            12 => Ok(OmDataType::Int8Array),
+            13 => Ok(OmDataType::Uint8Array),
+            14 => Ok(OmDataType::Int16Array),
+            15 => Ok(OmDataType::Uint16Array),
+            16 => Ok(OmDataType::Int32Array),
+            17 => Ok(OmDataType::Uint32Array),
+            18 => Ok(OmDataType::Int64Array),
+            19 => Ok(OmDataType::Uint64Array),
+            20 => Ok(OmDataType::FloatArray),
+            21 => Ok(OmDataType::DoubleArray),
+            22 => Ok(OmDataType::StringArray),
             _ => Err("Invalid data type value"),
         }
     }
@@ -115,12 +116,12 @@ impl TryFrom<u8> for DataType {
 
 /// Trait for types that can be stored as arrays in OmFiles
 pub trait OmFileArrayDataType {
-    const DATA_TYPE_ARRAY: DataType;
+    const DATA_TYPE_ARRAY: OmDataType;
 }
 
 /// Trait for types that can be stored as scalars in OmFiles
 pub trait OmFileScalarDataType: Default {
-    const DATA_TYPE_SCALAR: DataType;
+    const DATA_TYPE_SCALAR: OmDataType;
 
     /// Creates a new instance from raw bytes
     ///
@@ -166,77 +167,77 @@ pub trait OmFileScalarDataType: Default {
 
 // Implement both traits for all supported numeric types
 impl OmFileArrayDataType for i8 {
-    const DATA_TYPE_ARRAY: DataType = DataType::Int8Array;
+    const DATA_TYPE_ARRAY: OmDataType = OmDataType::Int8Array;
 }
 impl OmFileScalarDataType for i8 {
-    const DATA_TYPE_SCALAR: DataType = DataType::Int8;
+    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Int8;
 }
 
 impl OmFileArrayDataType for u8 {
-    const DATA_TYPE_ARRAY: DataType = DataType::Uint8Array;
+    const DATA_TYPE_ARRAY: OmDataType = OmDataType::Uint8Array;
 }
 impl OmFileScalarDataType for u8 {
-    const DATA_TYPE_SCALAR: DataType = DataType::Uint8;
+    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Uint8;
 }
 
 impl OmFileArrayDataType for i16 {
-    const DATA_TYPE_ARRAY: DataType = DataType::Int16Array;
+    const DATA_TYPE_ARRAY: OmDataType = OmDataType::Int16Array;
 }
 impl OmFileScalarDataType for i16 {
-    const DATA_TYPE_SCALAR: DataType = DataType::Int16;
+    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Int16;
 }
 
 impl OmFileArrayDataType for u16 {
-    const DATA_TYPE_ARRAY: DataType = DataType::Uint16Array;
+    const DATA_TYPE_ARRAY: OmDataType = OmDataType::Uint16Array;
 }
 impl OmFileScalarDataType for u16 {
-    const DATA_TYPE_SCALAR: DataType = DataType::Uint16;
+    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Uint16;
 }
 
 impl OmFileArrayDataType for i32 {
-    const DATA_TYPE_ARRAY: DataType = DataType::Int32Array;
+    const DATA_TYPE_ARRAY: OmDataType = OmDataType::Int32Array;
 }
 impl OmFileScalarDataType for i32 {
-    const DATA_TYPE_SCALAR: DataType = DataType::Int32;
+    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Int32;
 }
 
 impl OmFileArrayDataType for u32 {
-    const DATA_TYPE_ARRAY: DataType = DataType::Uint32Array;
+    const DATA_TYPE_ARRAY: OmDataType = OmDataType::Uint32Array;
 }
 impl OmFileScalarDataType for u32 {
-    const DATA_TYPE_SCALAR: DataType = DataType::Uint32;
+    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Uint32;
 }
 
 impl OmFileArrayDataType for i64 {
-    const DATA_TYPE_ARRAY: DataType = DataType::Int64Array;
+    const DATA_TYPE_ARRAY: OmDataType = OmDataType::Int64Array;
 }
 impl OmFileScalarDataType for i64 {
-    const DATA_TYPE_SCALAR: DataType = DataType::Int64;
+    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Int64;
 }
 
 impl OmFileArrayDataType for u64 {
-    const DATA_TYPE_ARRAY: DataType = DataType::Uint64Array;
+    const DATA_TYPE_ARRAY: OmDataType = OmDataType::Uint64Array;
 }
 impl OmFileScalarDataType for u64 {
-    const DATA_TYPE_SCALAR: DataType = DataType::Uint64;
+    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Uint64;
 }
 
 impl OmFileArrayDataType for f32 {
-    const DATA_TYPE_ARRAY: DataType = DataType::FloatArray;
+    const DATA_TYPE_ARRAY: OmDataType = OmDataType::FloatArray;
 }
 impl OmFileScalarDataType for f32 {
-    const DATA_TYPE_SCALAR: DataType = DataType::Float;
+    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Float;
 }
 
 impl OmFileArrayDataType for f64 {
-    const DATA_TYPE_ARRAY: DataType = DataType::DoubleArray;
+    const DATA_TYPE_ARRAY: OmDataType = OmDataType::DoubleArray;
 }
 impl OmFileScalarDataType for f64 {
-    const DATA_TYPE_SCALAR: DataType = DataType::Double;
+    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Double;
 }
 
 impl OmFileScalarDataType for String {
-    const DATA_TYPE_SCALAR: DataType = DataType::String;
+    const DATA_TYPE_SCALAR: OmDataType = OmDataType::String;
 
     /// Create a new String from raw bytes
     fn from_raw_bytes(bytes: &[u8]) -> Self {
@@ -260,7 +261,7 @@ impl OmFileScalarDataType for String {
 pub struct OmNone();
 
 impl OmFileScalarDataType for OmNone {
-    const DATA_TYPE_SCALAR: DataType = DataType::None;
+    const DATA_TYPE_SCALAR: OmDataType = OmDataType::None;
 
     fn from_raw_bytes(bytes: &[u8]) -> Self {
         assert!(bytes.len() == 0, "OmNone should not have any bytes");

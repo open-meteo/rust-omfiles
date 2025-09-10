@@ -1,10 +1,10 @@
 use crate::core::c_defaults::{c_error_string, create_uninit_encoder};
-use crate::core::compression::CompressionType;
-use crate::core::data_types::{DataType, OmFileArrayDataType, OmFileScalarDataType, OmNone};
+use crate::core::compression::OmCompressionType;
+use crate::core::data_types::{OmDataType, OmFileArrayDataType, OmFileScalarDataType, OmNone};
 use crate::errors::OmFilesError;
-use crate::io::buffered_writer::OmBufferedWriter;
-use crate::io::variable::OmOffsetSize;
 use crate::traits::OmFileWriterBackend;
+use crate::utils::buffered_writer::OmBufferedWriter;
+use crate::variable::OmOffsetSize;
 use ndarray::ArrayViewD;
 use om_file_format_sys::{
     OmEncoder_t, OmError_t, om_encoder_chunk_buffer_size, om_encoder_compress_chunk,
@@ -106,7 +106,7 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         &'a mut self,
         dimensions: Vec<u64>,
         chunk_dimensions: Vec<u64>,
-        compression: CompressionType,
+        compression: OmCompressionType,
         scale_factor: f32,
         add_offset: f32,
     ) -> Result<OmFileWriterArray<'a, T, Backend>, OmFilesError> {
@@ -200,7 +200,7 @@ pub struct OmFileWriterArray<'a, OmType: OmFileArrayDataType, Backend: OmFileWri
     chunk_index: u64,
     scale_factor: f32,
     add_offset: f32,
-    compression: CompressionType,
+    compression: OmCompressionType,
     data_type: PhantomData<OmType>,
     dimensions: Vec<u64>,
     chunks: Vec<u64>,
@@ -215,8 +215,8 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
     pub fn new(
         dimensions: Vec<u64>,
         chunk_dimensions: Vec<u64>,
-        compression: CompressionType,
-        data_type: DataType,
+        compression: OmCompressionType,
+        data_type: OmDataType,
         scale_factor: f32,
         add_offset: f32,
         buffer: &'a mut OmBufferedWriter<Backend>,
@@ -416,8 +416,8 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
 pub struct OmFileWriterArrayFinalized {
     pub scale_factor: f32,
     pub add_offset: f32,
-    pub compression: CompressionType,
-    pub data_type: DataType,
+    pub compression: OmCompressionType,
+    pub data_type: OmDataType,
     pub dimensions: Vec<u64>,
     pub chunks: Vec<u64>,
     pub lut_size: u64,
@@ -435,7 +435,7 @@ mod tests {
 
     use crate::{
         backends::memory::InMemoryBackend,
-        io::reader::OmFileReader,
+        reader::OmFileReader,
         traits::{OmFileReadable, OmFileVariable, ScalarOmVariable},
     };
 
@@ -447,7 +447,7 @@ mod tests {
 
         // Calculate size needed for scalar variable
         let size_scalar = unsafe {
-            om_variable_write_scalar_size(name.len() as u16, 0, DataType::Int8.to_c(), 0)
+            om_variable_write_scalar_size(name.len() as u16, 0, OmDataType::Int8.to_c(), 0)
         };
 
         assert_eq!(size_scalar, 13);
@@ -465,7 +465,7 @@ mod tests {
                 ptr::null(),
                 ptr::null(),
                 name.as_ptr() as *const ::std::os::raw::c_char,
-                DataType::Int8.to_c(),
+                OmDataType::Int8.to_c(),
                 &value as *const u8 as *const std::os::raw::c_void,
                 0,
             );
@@ -478,7 +478,7 @@ mod tests {
 
         // Verify the variable type and children count
         unsafe {
-            assert_eq!(om_variable_get_type(om_variable), DataType::Int8.to_c());
+            assert_eq!(om_variable_get_type(om_variable), OmDataType::Int8.to_c());
             assert_eq!(om_variable_get_children_count(om_variable), 0);
         }
 
@@ -506,7 +506,7 @@ mod tests {
             om_variable_write_scalar_size(
                 name.len() as u16,
                 0,
-                DataType::String.to_c(),
+                OmDataType::String.to_c(),
                 value.len() as u64,
             )
         };
@@ -525,7 +525,7 @@ mod tests {
                 ptr::null(),
                 ptr::null(),
                 name.as_ptr() as *const ::std::os::raw::c_char,
-                DataType::String.to_c(),
+                OmDataType::String.to_c(),
                 value.as_ptr() as *const std::os::raw::c_void,
                 value.len(),
             );
@@ -549,7 +549,7 @@ mod tests {
 
         // Verify the variable type and children count
         unsafe {
-            assert_eq!(om_variable_get_type(om_variable), DataType::String.to_c());
+            assert_eq!(om_variable_get_type(om_variable), OmDataType::String.to_c());
             assert_eq!(om_variable_get_children_count(om_variable), 0);
         }
 
@@ -576,7 +576,7 @@ mod tests {
 
         // Calculate size for None type scalar
         let size_scalar = unsafe {
-            om_variable_write_scalar_size(name.len() as u16, 0, DataType::None.to_c(), 0)
+            om_variable_write_scalar_size(name.len() as u16, 0, OmDataType::None.to_c(), 0)
         };
 
         assert_eq!(size_scalar, 12); // 8 (header) + 4 (name length) + 0 (no value)
@@ -593,7 +593,7 @@ mod tests {
                 ptr::null(),
                 ptr::null(),
                 name.as_ptr() as *const ::std::os::raw::c_char,
-                DataType::None.to_c(),
+                OmDataType::None.to_c(),
                 ptr::null(),
                 0,
             );
@@ -607,7 +607,7 @@ mod tests {
 
         // Verify the variable type and children count
         unsafe {
-            assert_eq!(om_variable_get_type(om_variable), DataType::None.to_c());
+            assert_eq!(om_variable_get_type(om_variable), OmDataType::None.to_c());
             assert_eq!(om_variable_get_children_count(om_variable), 0);
         }
 
@@ -639,12 +639,12 @@ mod tests {
 
         // Verify the group variable
         assert_eq!(read.get_name().unwrap(), "group");
-        assert_eq!(read.data_type(), DataType::None);
+        assert_eq!(read.data_type(), OmDataType::None);
 
         // Get the child variable, which is an attribute
         let child = read.get_child(0).unwrap();
         assert_eq!(child.get_name().unwrap(), "attribute");
-        assert_eq!(child.data_type(), DataType::Int32);
+        assert_eq!(child.data_type(), OmDataType::Int32);
         assert_eq!(child.expect_scalar()?.read_scalar::<i32>().unwrap(), 42);
 
         Ok(())

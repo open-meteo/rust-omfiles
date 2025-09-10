@@ -1,5 +1,5 @@
 use crate::errors::OmFilesError;
-use crate::io::variable::OmOffsetSize;
+use crate::variable::OmOffsetSize;
 use om_file_format_sys::om_trailer_read;
 use std::os::raw::c_void;
 

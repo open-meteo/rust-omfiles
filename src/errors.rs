@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+/// Errors thrown by the OmFiles library.
 #[derive(Error, Debug, PartialEq)]
 pub enum OmFilesError {
     #[error("Cannot open file '{filename}': errno {errno}, error: {error}")]

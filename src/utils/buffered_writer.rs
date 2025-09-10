@@ -1,6 +1,6 @@
 use crate::errors::OmFilesError;
 use crate::traits::OmFileWriterBackend;
-use crate::utils::divide_rounded_up;
+use crate::utils::math::divide_rounded_up;
 
 /// All data is written to a buffer before flushed to a backend
 pub struct OmBufferedWriter<Backend: OmFileWriterBackend> {

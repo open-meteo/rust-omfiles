@@ -2,6 +2,7 @@ use om_file_format_sys::{OmVariable_t, om_variable_init};
 use std::ops::Deref;
 use std::os::raw::c_void;
 
+/// A type indicating the offset and size of a variable in an OmFile.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OmOffsetSize {
     pub offset: u64,

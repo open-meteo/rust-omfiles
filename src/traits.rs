@@ -1,8 +1,8 @@
 use crate::core::c_defaults::{c_error_string, new_data_read, new_index_read};
-use crate::core::data_types::{DataType, OmFileArrayDataType};
+use crate::core::data_types::{OmDataType, OmFileArrayDataType};
 use crate::errors::OmFilesError;
-use crate::io::reader::OmFileReader;
-use crate::io::variable::{OmOffsetSize, OmVariableContainer};
+use crate::reader::OmFileReader;
+use crate::variable::{OmOffsetSize, OmVariableContainer};
 use ndarray::ArrayD;
 use om_file_format_sys::{
     OmDecoder_t, OmError_t, om_decoder_decode_chunks, om_decoder_next_data_read,
@@ -124,7 +124,7 @@ pub(crate) trait OmFileVariableImpl {
 /// - **Group variables**: Containers holding other only children but no data
 pub trait OmFileVariable {
     /// Returns the data type of this variable.
-    fn data_type(&self) -> DataType;
+    fn data_type(&self) -> OmDataType;
     /// Returns the variable's name, if it has one.
     fn get_name(&self) -> Option<String>;
     /// Returns the number of direct child variables.
@@ -133,9 +133,9 @@ pub trait OmFileVariable {
 
 // Blanket implementation of OmFileVariable for types implementing OmFileVariableImpl
 impl<T: OmFileVariableImpl> OmFileVariable for T {
-    fn data_type(&self) -> DataType {
+    fn data_type(&self) -> OmDataType {
         unsafe {
-            DataType::try_from(
+            OmDataType::try_from(
                 om_file_format_sys::om_variable_get_type(*self.variable().variable) as u8,
             )
             .expect("Invalid data type")
@@ -209,7 +209,7 @@ pub(crate) trait ArrayOmVariableImpl: OmFileVariableImpl {
 /// An array variable in an OmFile.
 pub trait ArrayOmVariable {
     /// Returns the compression type of the variable
-    fn compression(&self) -> crate::core::compression::CompressionType;
+    fn compression(&self) -> crate::core::compression::OmCompressionType;
     /// Returns the scale factor of the variable
     fn scale_factor(&self) -> f32;
     /// Returns the add offset of the variable
@@ -225,15 +225,15 @@ pub trait ArrayOmVariable {
         dim_read: &[Range<u64>],
         into_cube_offset: &[u64],
         into_cube_dimension: &[u64],
-    ) -> Result<crate::io::wrapped_decoder::WrappedDecoder, OmFilesError>;
+    ) -> Result<crate::utils::wrapped_decoder::WrappedDecoder, OmFilesError>;
 }
 
 // Blanket implementation of ArrayOmVariable for types implementing ArrayOmVariableImpl
 impl<T: ArrayOmVariableImpl> ArrayOmVariable for T {
     /// Returns the compression type of the variable
-    fn compression(&self) -> crate::core::compression::CompressionType {
+    fn compression(&self) -> crate::core::compression::OmCompressionType {
         unsafe {
-            crate::core::compression::CompressionType::try_from(
+            crate::core::compression::OmCompressionType::try_from(
                 om_file_format_sys::om_variable_get_compression(*self.variable().variable) as u8,
             )
             .expect("Invalid compression type")
@@ -272,7 +272,7 @@ impl<T: ArrayOmVariableImpl> ArrayOmVariable for T {
         dim_read: &[Range<u64>],
         into_cube_offset: &[u64],
         into_cube_dimension: &[u64],
-    ) -> Result<crate::io::wrapped_decoder::WrappedDecoder, OmFilesError> {
+    ) -> Result<crate::utils::wrapped_decoder::WrappedDecoder, OmFilesError> {
         let n_dimensions_read = dim_read.len();
         let n_dims = self.get_dimensions().len();
 
@@ -289,7 +289,7 @@ impl<T: ArrayOmVariableImpl> ArrayOmVariable for T {
         let read_count: Vec<u64> = dim_read.iter().map(|r| r.end - r.start).collect();
 
         // Initialize decoder
-        let decoder = crate::io::wrapped_decoder::WrappedDecoder::new(
+        let decoder = crate::utils::wrapped_decoder::WrappedDecoder::new(
             self.variable().variable,
             n_dimensions_read as u64,
             read_offset,

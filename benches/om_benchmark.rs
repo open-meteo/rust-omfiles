@@ -1,12 +1,12 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use ndarray::{Array, ArrayViewD};
 use omfiles::{
+    OmCompressionType,
     backends::{
         memory::InMemoryBackend,
         mmapfile::{MmapFile, Mode},
     },
-    core::compression::CompressionType,
-    io::{reader::OmFileReader, writer::OmFileWriter},
+    {reader::OmFileReader, writer::OmFileWriter},
 };
 use rand::Rng;
 use std::{
@@ -30,7 +30,7 @@ fn write_om_file(file: &str, data: ArrayViewD<f32>) {
         .prepare_array::<f32>(
             vec![DIM0_SIZE, DIM1_SIZE],
             vec![CHUNK0_SIZE, CHUNK1_SIZE],
-            CompressionType::PforDelta2dInt16,
+            OmCompressionType::PforDelta2dInt16,
             1.0,
             0.0,
         )
@@ -62,7 +62,7 @@ pub fn benchmark_in_memory(c: &mut Criterion) {
                     .prepare_array::<f32>(
                         vec![DIM0_SIZE, DIM1_SIZE],
                         vec![CHUNK0_SIZE, CHUNK1_SIZE],
-                        CompressionType::FpxXor2d,
+                        OmCompressionType::FpxXor2d,
                         0.1,
                         0.0,
                     )

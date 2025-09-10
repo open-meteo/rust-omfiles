@@ -1,6 +1,6 @@
 use crate::core::c_defaults::new_index_read;
 use crate::core::c_defaults::{c_error_string, create_uninit_decoder, new_data_read};
-use crate::{errors::OmFilesError, io::variable::OmVariablePtr};
+use crate::{errors::OmFilesError, variable::OmVariablePtr};
 use om_file_format_sys::{
     OmDecoder_indexRead_t, OmDecoder_t, OmError_t, OmRange_t, om_decoder_decode_chunks,
     om_decoder_init, om_decoder_next_data_read, om_decoder_next_index_read,

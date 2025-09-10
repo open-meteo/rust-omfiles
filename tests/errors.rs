@@ -1,10 +1,10 @@
 use ndarray::ArrayD;
+use omfiles::OmCompressionType;
+use omfiles::OmFilesError;
 use omfiles::backends::memory::InMemoryBackend;
 use omfiles::backends::mmapfile::MmapFile;
-use omfiles::core::compression::CompressionType;
-use omfiles::errors::OmFilesError;
-use omfiles::io::reader::OmFileReader;
-use omfiles::io::writer::OmFileWriter;
+use omfiles::reader::OmFileReader;
+use omfiles::writer::OmFileWriter;
 use std::borrow::BorrowMut;
 use std::fs;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ fn test_mismatching_cube_dimension_length() {
     let mut writer = OmFileWriter::new(backend.borrow_mut(), 1024);
 
     let result =
-        writer.prepare_array::<i32>(vec![10, 10], vec![5], CompressionType::None, 1.0, 0.0);
+        writer.prepare_array::<i32>(vec![10, 10], vec![5], OmCompressionType::None, 1.0, 0.0);
 
     assert_eq!(error_string(result), "Mismatching cube dimension length");
 }
@@ -32,7 +32,7 @@ fn test_chunk_has_wrong_number_of_elements() {
         .prepare_array::<i32>(
             vec![10, 10],
             vec![5, 5],
-            CompressionType::PforDelta2d,
+            OmCompressionType::PforDelta2d,
             1.0,
             0.0,
         )
@@ -53,7 +53,7 @@ fn test_offset_and_count_exceed_dimension() {
         .prepare_array::<i32>(
             vec![10, 10],
             vec![5, 5],
-            CompressionType::PforDelta2d,
+            OmCompressionType::PforDelta2d,
             1.0,
             0.0,
         )
@@ -87,7 +87,7 @@ fn test_mismatching_cube_dimension_length_for_read() {
             .prepare_array::<i32>(
                 vec![10, 10],
                 vec![5, 5],
-                CompressionType::PforDelta2d,
+                OmCompressionType::PforDelta2d,
                 1.0,
                 0.0,
             )
