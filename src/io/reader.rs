@@ -5,7 +5,7 @@ use crate::io::reader_utils::process_trailer;
 use crate::io::variable::OmVariableContainer;
 use crate::traits::{
     ArrayOmVariable, ArrayOmVariableImpl, OmFileReadableImpl, OmFileReaderBackend, OmFileVariable,
-    OmFileVariableImpl,
+    OmFileVariableImpl, ScalarOmVariableImpl,
 };
 use ndarray::ArrayD;
 use num_traits::Zero;
@@ -126,6 +126,8 @@ impl<Backend: OmFileReaderBackend> OmFileVariableImpl for OmFileScalar<Backend> 
         &self.variable
     }
 }
+
+impl<Backend: OmFileReaderBackend> ScalarOmVariableImpl for OmFileScalar<Backend> {}
 
 impl<Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileScalar<Backend> {
     fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReader<Backend> {

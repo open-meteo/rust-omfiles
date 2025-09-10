@@ -13,6 +13,7 @@ use std::future::Future;
 use std::ops::{Deref, Range};
 use std::os::raw::c_void;
 
+/// A trait for writing byte data synchronously to different storage backends.
 pub trait OmFileWriterBackend {
     fn write(&mut self, data: &[u8]) -> Result<(), OmFilesError>;
     fn synchronize(&self) -> Result<(), OmFilesError>;
@@ -20,14 +21,15 @@ pub trait OmFileWriterBackend {
 
 /// A trait for reading byte data synchronously from different storage backends.
 pub trait OmFileReaderBackend: Send + Sync {
-    /// The type of the byte container returned by `get_bytes`.
-    /// This can be a borrowed slice (`&'a [u8]`) or an owned container (`Vec<u8>`).
-    /// The `Deref` bound allows us to treat it like a slice `&[u8]` easily.
+    /// The type of byte container returned by [`get_bytes`](Self::get_bytes).
+    ///
+    /// For zero-copy backends (like memory-mapped files), this is typically `&[u8]`.
+    /// For I/O-based backends, this is typically `Vec<u8>`.
     type Bytes<'a>: Deref<Target = [u8]> + Send + Sync
     where
         Self: 'a;
 
-    /// Length in bytes
+    /// Returns the total size of the data source in bytes.
     fn count(&self) -> usize;
 
     /// Prefetch data for future access. E.g. madvice on memory mapped files
@@ -108,20 +110,28 @@ pub(crate) trait OmFileVariableImpl {
     fn variable(&self) -> &OmVariableContainer;
 }
 
-/// Any variable in an OmFile.
+/// Represents any variable within an OM file structure.
 ///
-/// Any variable has a name, data type, and number of children.
-/// Any variable stored in an OmFile should implement this trait.
+/// OM files contain hierarchical variable structures where each variable
+/// can contain metadata, data, and child variables. This trait provides
+/// access to common variable properties.
+///
+/// # Variable Types
+///
+/// Variables can be:
+/// - **Scalar variables**: Single values (integers, floats, strings)
+/// - **Array variables**: Multi-dimensional arrays with compression
+/// - **Group variables**: Containers holding other only children but no data
 pub trait OmFileVariable {
-    /// Returns the data type of the variable
+    /// Returns the data type of this variable.
     fn data_type(&self) -> DataType;
-    /// Returns the name of the variable, if available
+    /// Returns the variable's name, if it has one.
     fn get_name(&self) -> Option<String>;
-    /// Returns the number of children of the variable
+    /// Returns the number of direct child variables.
     fn number_of_children(&self) -> u32;
 }
 
-// Blanket implementation for OmFileVariable for types implementing OmFileVariableImpl
+// Blanket implementation of OmFileVariable for types implementing OmFileVariableImpl
 impl<T: OmFileVariableImpl> OmFileVariable for T {
     fn data_type(&self) -> DataType {
         unsafe {
@@ -148,14 +158,7 @@ impl<T: OmFileVariableImpl> OmFileVariable for T {
     }
 }
 
-/// A scalar variable in an OmFile.
-pub trait ScalarOmVariable {
-    /// Read a scalar value of the specified type
-    fn read_scalar<T: crate::core::data_types::OmFileScalarDataType>(&self) -> Option<T>;
-}
-
-// Blanket implementation for ScalarOmVariable
-impl<U: OmFileVariableImpl + OmFileVariable> ScalarOmVariable for U {
+pub(crate) trait ScalarOmVariableImpl: OmFileVariableImpl + OmFileVariable {
     /// Read a scalar value of the specified type
     fn read_scalar<T: crate::core::data_types::OmFileScalarDataType>(&self) -> Option<T> {
         if T::DATA_TYPE_SCALAR != self.data_type() {
@@ -185,7 +188,20 @@ impl<U: OmFileVariableImpl + OmFileVariable> ScalarOmVariable for U {
     }
 }
 
-pub(crate) trait ArrayOmVariableImpl {
+/// A scalar variable in an OmFile.
+pub trait ScalarOmVariable {
+    /// Read a scalar value of the specified type
+    fn read_scalar<T: crate::core::data_types::OmFileScalarDataType>(&self) -> Option<T>;
+}
+
+// Blanket implementation of ScalarOmVariable
+impl<T: ScalarOmVariableImpl> ScalarOmVariable for T {
+    fn read_scalar<U: crate::core::data_types::OmFileScalarDataType>(&self) -> Option<U> {
+        ScalarOmVariableImpl::read_scalar(self)
+    }
+}
+
+pub(crate) trait ArrayOmVariableImpl: OmFileVariableImpl {
     fn io_size_max(&self) -> u64;
     fn io_size_merge(&self) -> u64;
 }
@@ -212,8 +228,8 @@ pub trait ArrayOmVariable {
     ) -> Result<crate::io::wrapped_decoder::WrappedDecoder, OmFilesError>;
 }
 
-// Blanket implementation for any type that implements the private trait
-impl<U: ArrayOmVariableImpl + OmFileVariableImpl> ArrayOmVariable for U {
+// Blanket implementation of ArrayOmVariable for types implementing ArrayOmVariableImpl
+impl<T: ArrayOmVariableImpl> ArrayOmVariable for T {
     /// Returns the compression type of the variable
     fn compression(&self) -> crate::core::compression::CompressionType {
         unsafe {
@@ -251,7 +267,7 @@ impl<U: ArrayOmVariableImpl + OmFileVariableImpl> ArrayOmVariable for U {
     }
 
     /// Prepare common parameters for reading data
-    fn prepare_read_parameters<T: OmFileArrayDataType>(
+    fn prepare_read_parameters<U: OmFileArrayDataType>(
         &self,
         dim_read: &[Range<u64>],
         into_cube_offset: &[u64],
@@ -352,26 +368,42 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
     }
 }
 
-/// A trait that allows for child traversal and metadata retrieval.
+/// Provides navigation capabilities for hierarchical OM file structures.
+///
+/// This trait allows traversing the variable tree, accessing child variables,
+/// and collecting metadata about the entire structure. It's the main interface
+/// for exploring OM file contents.
 pub trait OmFileReadable<Backend: OmFileReaderBackend>: OmFileVariable {
-    /// Returns a HashMap mapping variable names to their offset and size
-    /// This function needs to traverse the entire variable tree, therefore
-    /// it is best to make sure that variable metadata is close to each other
-    /// at the end of the file (before the trailer). The caller could then
-    /// make sure that this part of the file is loaded/cached in memory
+    /// Collects metadata for all variables in the hierarchy.
+    ///
+    /// This method traverses the entire variable tree and returns a mapping
+    /// from hierarchical variable paths to their storage locations. The paths
+    /// use forward slashes as separators (e.g., "root/group1/variable2").
+    ///
+    /// # Performance Notes
+    ///
+    /// This operation requires traversing the entire variable tree, so it's
+    /// recommended to ensure variable metadata is cached or stored efficiently
+    /// in the backend.
     fn get_flat_variable_metadata(&self) -> HashMap<String, OmOffsetSize>;
 
-    /// Returns an OmFileReader at the given child index
+    /// Returns a reader for the child variable at the specified index.
+    ///
+    /// Child indices are zero-based and must be less than [`number_of_children()`](OmFileVariable::number_of_children).
     fn get_child(&self, index: u32) -> Option<OmFileReader<Backend>>;
 
-    /// Initializes an OmFileReader from an offset and size
+    /// Creates a reader for a variable at a specific storage location.
+    ///
+    /// This is typically used internally when navigating the variable hierarchy,
+    /// but can also be used to directly access variables when their storage
+    /// locations are known.
     fn init_child_from_offset_size(
         &self,
         offset_size: OmOffsetSize,
     ) -> Result<OmFileReader<Backend>, OmFilesError>;
 }
 
-// Blanket implementation
+// Blanket implementation for any OmFileReaderBackend
 impl<T, Backend> OmFileReadable<Backend> for T
 where
     T: OmFileReadableImpl<Backend>,
