@@ -22,7 +22,7 @@ pub struct OmFileReader<Backend> {
     variable: OmVariableContainer,
 }
 
-impl<Backend: OmFileReaderBackend> OmFileVariableImpl for OmFileReader<Backend> {
+impl<Backend> OmFileVariableImpl for OmFileReader<Backend> {
     fn variable(&self) -> &OmVariableContainer {
         &self.variable
     }
@@ -121,13 +121,13 @@ pub struct OmFileScalar<'a, Backend> {
     pub(crate) variable: &'a OmVariableContainer,
 }
 
-impl<'a, Backend: OmFileReaderBackend> OmFileVariableImpl for OmFileScalar<'a, Backend> {
+impl<'a, Backend> OmFileVariableImpl for OmFileScalar<'a, Backend> {
     fn variable(&self) -> &OmVariableContainer {
         self.variable
     }
 }
 
-impl<'a, Backend: OmFileReaderBackend> OmScalarVariableImpl for OmFileScalar<'a, Backend> {}
+impl<'a, Backend> OmScalarVariableImpl for OmFileScalar<'a, Backend> {}
 
 impl<'a, Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileScalar<'a, Backend> {
     fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReader<Backend> {
@@ -152,7 +152,7 @@ pub struct OmFileArray<'a, Backend> {
     io_size_merge: u64,
 }
 
-impl<'a, Backend: OmFileReaderBackend> OmFileVariableImpl for OmFileArray<'a, Backend> {
+impl<'a, Backend> OmFileVariableImpl for OmFileArray<'a, Backend> {
     fn variable(&self) -> &OmVariableContainer {
         self.variable
     }
@@ -171,7 +171,7 @@ impl<'a, Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileArr
     }
 }
 
-impl<'a, Backend: OmFileReaderBackend> OmArrayVariableImpl for OmFileArray<'a, Backend> {
+impl<'a, Backend> OmArrayVariableImpl for OmFileArray<'a, Backend> {
     fn io_size_max(&self) -> u64 {
         self.io_size_max
     }

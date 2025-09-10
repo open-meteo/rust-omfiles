@@ -114,10 +114,8 @@ pub fn benchmark_read(c: &mut Criterion) {
     let file = "benchmark.om";
     let file_for_reading = File::open(file).unwrap();
     let read_backend = MmapFile::new(file_for_reading, Mode::ReadOnly).unwrap();
-    let reader = OmFileReader::new(Arc::new(read_backend))
-        .unwrap()
-        .expect_array()
-        .unwrap();
+    let reader = OmFileReader::new(Arc::new(read_backend)).unwrap();
+    let reader = reader.expect_array().unwrap();
 
     let dim0_read_size = 256;
 
