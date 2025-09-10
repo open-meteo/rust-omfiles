@@ -5,7 +5,9 @@ use omfiles::{
     FileAccessMode, InMemoryBackend, MmapFile, OmCompressionType, OmFilesError, OmOffsetSize,
     reader::OmFileReader,
     reader_async::OmFileReaderAsync,
-    traits::{OmFileReadable, OmFileReaderBackend, OmFileVariable, OmScalarVariable},
+    traits::{
+        OmArrayVariable, OmFileReadable, OmFileReaderBackend, OmFileVariable, OmScalarVariable,
+    },
     writer::OmFileWriter,
 };
 use smol_macros::test;
@@ -782,7 +784,7 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
         let mut writer = file_writer
             .prepare_array::<f32>(
                 dims.clone(),
-                chunk_dimensions,
+                chunk_dimensions.clone(),
                 compression,
                 scale_factor,
                 add_offset,
@@ -802,6 +804,12 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
         let backend = Arc::new(MmapFile::new(file_for_reading, FileAccessMode::ReadOnly)?);
         let read = OmFileReader::new(backend.clone())?;
         let read = read.expect_array()?;
+        // Test array properties
+        assert_eq!(read.get_dimensions(), dims);
+        assert_eq!(read.get_chunk_dimensions(), chunk_dimensions);
+        assert_eq!(read.add_offset(), add_offset);
+        assert_eq!(read.scale_factor(), scale_factor);
+        assert_eq!(read.compression(), OmCompressionType::PforDelta2dInt16);
 
         // Rest of test remains the same but using read.read::<f32>() instead of read_var.read()
         let a = read.read::<f32>(&[0..5, 0..5])?;
