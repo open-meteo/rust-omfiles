@@ -1,6 +1,5 @@
 use crate::errors::OmFilesError;
 use crate::traits::OmFileWriterBackend;
-use crate::utils::math::divide_rounded_up;
 
 /// All data is written to a buffer before flushed to a backend
 pub struct OmBufferedWriter<Backend: OmFileWriterBackend> {
@@ -106,5 +105,14 @@ impl<Backend: OmFileWriterBackend> OmBufferedWriter<Backend> {
 impl<Backend: OmFileWriterBackend> Drop for OmBufferedWriter<Backend> {
     fn drop(&mut self) {
         // Vec handles cleanup automatically
+    }
+}
+
+fn divide_rounded_up(value: usize, divisor: usize) -> usize {
+    let rem = value % divisor;
+    if rem == 0 {
+        value / divisor
+    } else {
+        value / divisor + 1
     }
 }
