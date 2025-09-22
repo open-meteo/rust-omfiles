@@ -20,6 +20,18 @@ impl OmFileWriterBackend for &File {
     }
 }
 
+impl OmFileWriterBackend for File {
+    fn write(&mut self, data: &[u8]) -> Result<(), OmFilesError> {
+        self.write_all(data).map_err(|e| map_io_error(e))?;
+        Ok(())
+    }
+
+    fn synchronize(&self) -> Result<(), OmFilesError> {
+        self.sync_all().map_err(|e| map_io_error(e))?;
+        Ok(())
+    }
+}
+
 fn map_io_error(e: std::io::Error) -> OmFilesError {
     OmFilesError::FileWriterError {
         errno: e.raw_os_error().unwrap_or(0),

@@ -226,7 +226,7 @@ fn test_write_chunks() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         let file_handle = File::create(file)?;
-        let mut file_writer = OmFileWriter::new(&file_handle, 8);
+        let mut file_writer = OmFileWriter::new(file_handle, 8);
         let mut writer = file_writer
             .prepare_array::<f32>(
                 dims.clone(),
