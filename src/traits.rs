@@ -379,6 +379,18 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
         self.init_child_from_offset_size(offset_size).ok()
     }
 
+    fn get_child_by_name(&self, name: &str) -> Option<OmFileReader<Backend>> {
+        for i in 0..self.number_of_children() {
+            let child = self.get_child(i);
+            if let Some(child) = child {
+                if child.get_name().as_ref().map_or(false, |n| n == name) {
+                    return Some(child);
+                }
+            }
+        }
+        None
+    }
+
     fn init_child_from_offset_size(
         &self,
         offset_size: OmOffsetSize,
@@ -448,6 +460,11 @@ pub trait OmFileReadable<Backend: OmFileReaderBackend>: OmFileVariable {
     /// Child indices are zero-based and must be less than [`number_of_children()`](OmFileVariable::number_of_children).
     fn get_child(&self, index: u32) -> Option<OmFileReader<Backend>>;
 
+    /// Returns a reader for the child variable with the specified name.
+    ///
+    /// Child names are case-sensitive and must match exactly.
+    fn get_child_by_name(&self, name: &str) -> Option<OmFileReader<Backend>>;
+
     /// Creates a reader for a variable at a specific storage location.
     ///
     /// This is typically used internally when navigating the variable hierarchy,
@@ -473,6 +490,10 @@ where
 
     fn get_child(&self, index: u32) -> Option<OmFileReader<Backend>> {
         OmFileReadableImpl::get_child(self, index)
+    }
+
+    fn get_child_by_name(&self, name: &str) -> Option<OmFileReader<Backend>> {
+        OmFileReadableImpl::get_child_by_name(self, name)
     }
 
     fn init_child_from_offset_size(

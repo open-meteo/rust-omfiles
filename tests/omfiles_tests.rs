@@ -495,7 +495,7 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(child.read_scalar::<i32>().unwrap(), 12323154i32);
         assert_eq!(child.get_name().unwrap(), "int32");
 
-        let child2 = read.get_child(1).unwrap();
+        let child2 = read.get_child_by_name("double").unwrap();
         let child2 = child2.expect_scalar()?;
         assert_eq!(child2.read_scalar::<f64>().unwrap(), 12323154f64);
         assert_eq!(child2.get_name().unwrap(), "double");
