@@ -366,7 +366,7 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
     fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReader<Backend>;
     fn backend(&self) -> &Backend;
 
-    fn get_child(&self, index: u32) -> Option<OmFileReader<Backend>> {
+    fn get_child_by_index(&self, index: u32) -> Option<OmFileReader<Backend>> {
         let mut offset = 0u64;
         let mut size = 0u64;
         if !unsafe {
@@ -381,7 +381,7 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
 
     fn get_child_by_name(&self, name: &str) -> Option<OmFileReader<Backend>> {
         for i in 0..self.number_of_children() {
-            let child = self.get_child(i);
+            let child = self.get_child_by_index(i);
             if let Some(child) = child {
                 if child.name() == name {
                     return Some(child);
@@ -428,7 +428,7 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
         let num_children = self.number_of_children();
         for i in 0..num_children {
             let child_path = current_path.clone();
-            if let Some(child) = self.get_child(i) {
+            if let Some(child) = self.get_child_by_index(i) {
                 child.collect_variable_metadata(child_path, result);
             }
         }
@@ -457,7 +457,7 @@ pub trait OmFileReadable<Backend: OmFileReaderBackend>: OmFileVariable {
     /// Returns a reader for the child variable at the specified index.
     ///
     /// Child indices are zero-based and must be less than [`number_of_children()`](OmFileVariable::number_of_children).
-    fn get_child(&self, index: u32) -> Option<OmFileReader<Backend>>;
+    fn get_child_by_index(&self, index: u32) -> Option<OmFileReader<Backend>>;
 
     /// Returns a reader for the child variable with the specified name.
     ///
@@ -487,8 +487,8 @@ where
         result
     }
 
-    fn get_child(&self, index: u32) -> Option<OmFileReader<Backend>> {
-        OmFileReadableImpl::get_child(self, index)
+    fn get_child_by_index(&self, index: u32) -> Option<OmFileReader<Backend>> {
+        OmFileReadableImpl::get_child_by_index(self, index)
     }
 
     fn get_child_by_name(&self, name: &str) -> Option<OmFileReader<Backend>> {

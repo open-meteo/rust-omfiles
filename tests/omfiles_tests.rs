@@ -490,7 +490,7 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
 
         assert_eq!(read.number_of_children(), 2);
 
-        let child = read.get_child(0).unwrap();
+        let child = read.get_child_by_index(0).unwrap();
         let child = child.expect_scalar()?;
         assert_eq!(child.read_scalar::<i32>().unwrap(), 12323154i32);
         assert_eq!(child.name(), "int32");
@@ -500,7 +500,7 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(child2.read_scalar::<f64>().unwrap(), 12323154f64);
         assert_eq!(child2.name(), "double");
 
-        assert!(read.get_child(2).is_none());
+        assert!(read.get_child_by_index(2).is_none());
 
         let read = read.expect_array()?;
 
@@ -708,7 +708,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         // let reader = parent_reader.into_generic_reader();
 
         // Check child1 data and its subchild
-        let child1 = reader.get_child(0).unwrap();
+        let child1 = reader.get_child_by_index(0).unwrap();
         assert_eq!(child1.name(), "child1");
         let child1_data = child1.expect_array()?.read::<f32>(&[0..2, 0..2])?;
         let expected_child1 =
@@ -717,7 +717,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
 
         // Check child1's subchild
         assert_eq!(child1.number_of_children(), 1);
-        let subchild = child1.get_child(0).unwrap();
+        let subchild = child1.get_child_by_index(0).unwrap();
         assert_eq!(subchild.name(), "subchild");
         let subchild_data = subchild.expect_array()?.read::<f32>(&[0..4, 0..500])?;
         let expected_subchild = ArrayD::from_shape_vec(
@@ -728,7 +728,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(subchild_data, expected_subchild);
 
         // Check child2 data (no children)
-        let child2 = reader.get_child(1).unwrap();
+        let child2 = reader.get_child_by_index(1).unwrap();
         assert_eq!(child2.name(), "child2");
         assert_eq!(child2.number_of_children(), 0);
         let child2_data = child2.expect_array()?.read::<f32>(&[0..2, 0..2])?;
@@ -737,21 +737,21 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(child2_data, expected_child2);
 
         // Check attributes
-        let int32 = reader.get_child(2).unwrap();
+        let int32 = reader.get_child_by_index(2).unwrap();
         assert_eq!(int32.name(), "int32");
         assert_eq!(
             int32.expect_scalar()?.read_scalar::<i32>().unwrap(),
             12323154i32
         );
 
-        let double = reader.get_child(3).unwrap();
+        let double = reader.get_child_by_index(3).unwrap();
         assert_eq!(double.name(), "double");
         assert_eq!(
             double.expect_scalar()?.read_scalar::<f64>().unwrap(),
             12323154f64
         );
 
-        let string = reader.get_child(4).unwrap();
+        let string = reader.get_child_by_index(4).unwrap();
         assert_eq!(string.name(), "string");
         assert_eq!(
             string.expect_scalar()?.read_scalar::<String>().unwrap(),
