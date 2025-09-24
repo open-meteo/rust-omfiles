@@ -653,12 +653,12 @@ mod tests {
         let read = OmFileReader::new(Arc::new(in_memory_backend))?;
 
         // Verify the group variable
-        assert_eq!(read.get_name().unwrap(), "group");
+        assert_eq!(read.name(), "group");
         assert_eq!(read.data_type(), OmDataType::None);
 
         // Get the child variable, which is an attribute
         let child = read.get_child(0).unwrap();
-        assert_eq!(child.get_name().unwrap(), "attribute");
+        assert_eq!(child.name(), "attribute");
         assert_eq!(child.data_type(), OmDataType::Int32);
         assert_eq!(child.expect_scalar()?.read_scalar::<i32>().unwrap(), 42);
 

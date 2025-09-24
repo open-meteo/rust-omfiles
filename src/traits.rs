@@ -182,7 +182,7 @@ pub trait OmFileVariable {
     /// Returns the data type of this variable.
     fn data_type(&self) -> OmDataType;
     /// Returns the variable's name, if it has one.
-    fn get_name(&self) -> Option<String>;
+    fn name(&self) -> &str;
     /// Returns the number of direct child variables.
     fn number_of_children(&self) -> u32;
 }
@@ -198,14 +198,14 @@ impl<T: OmFileVariableImpl> OmFileVariable for T {
         }
     }
 
-    fn get_name(&self) -> Option<String> {
+    fn name(&self) -> &str {
         unsafe {
             let name = om_file_format_sys::om_variable_get_name(*self.variable().variable);
             if name.size == 0 {
-                return None;
+                return "";
             }
             let bytes = std::slice::from_raw_parts(name.value as *const u8, name.size as usize);
-            String::from_utf8(bytes.to_vec()).ok()
+            str::from_utf8(bytes).unwrap_or_default()
         }
     }
 
@@ -383,7 +383,7 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
         for i in 0..self.number_of_children() {
             let child = self.get_child(i);
             if let Some(child) = child {
-                if child.get_name().as_ref().map_or(false, |n| n == name) {
+                if child.name() == name {
                     return Some(child);
                 }
             }
@@ -411,18 +411,17 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
     ) {
         // Add current variable's metadata if it has a name and offset_size
         // TODO: This requires for names to be unique
-        if let Some(name) = self.get_name() {
-            if let Some(offset_size) = &self.variable().offset_size {
-                current_path.push(name.to_string());
-                // Create hierarchical key
-                let path_str = current_path
-                    .iter()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<_>>()
-                    .join("/");
+        let name = self.name();
+        if let Some(offset_size) = &self.variable().offset_size {
+            current_path.push(name.to_string());
+            // Create hierarchical key
+            let path_str = current_path
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<_>>()
+                .join("/");
 
-                result.insert(path_str, offset_size.clone());
-            }
+            result.insert(path_str, offset_size.clone());
         }
 
         // Process children

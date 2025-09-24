@@ -493,12 +493,12 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
         let child = read.get_child(0).unwrap();
         let child = child.expect_scalar()?;
         assert_eq!(child.read_scalar::<i32>().unwrap(), 12323154i32);
-        assert_eq!(child.get_name().unwrap(), "int32");
+        assert_eq!(child.name(), "int32");
 
         let child2 = read.get_child_by_name("double").unwrap();
         let child2 = child2.expect_scalar()?;
         assert_eq!(child2.read_scalar::<f64>().unwrap(), 12323154f64);
-        assert_eq!(child2.get_name().unwrap(), "double");
+        assert_eq!(child2.name(), "double");
 
         assert!(read.get_child(2).is_none());
 
@@ -709,7 +709,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
 
         // Check child1 data and its subchild
         let child1 = reader.get_child(0).unwrap();
-        assert_eq!(child1.get_name().unwrap(), "child1");
+        assert_eq!(child1.name(), "child1");
         let child1_data = child1.expect_array()?.read::<f32>(&[0..2, 0..2])?;
         let expected_child1 =
             ArrayD::from_shape_vec(vec![2, 2], vec![10.0, 11.0, 12.0, 13.0]).unwrap();
@@ -718,7 +718,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         // Check child1's subchild
         assert_eq!(child1.number_of_children(), 1);
         let subchild = child1.get_child(0).unwrap();
-        assert_eq!(subchild.get_name().unwrap(), "subchild");
+        assert_eq!(subchild.name(), "subchild");
         let subchild_data = subchild.expect_array()?.read::<f32>(&[0..4, 0..500])?;
         let expected_subchild = ArrayD::from_shape_vec(
             vec![4, 500],
@@ -729,7 +729,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
 
         // Check child2 data (no children)
         let child2 = reader.get_child(1).unwrap();
-        assert_eq!(child2.get_name().unwrap(), "child2");
+        assert_eq!(child2.name(), "child2");
         assert_eq!(child2.number_of_children(), 0);
         let child2_data = child2.expect_array()?.read::<f32>(&[0..2, 0..2])?;
         let expected_child2 =
@@ -738,21 +738,21 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
 
         // Check attributes
         let int32 = reader.get_child(2).unwrap();
-        assert_eq!(int32.get_name().unwrap(), "int32");
+        assert_eq!(int32.name(), "int32");
         assert_eq!(
             int32.expect_scalar()?.read_scalar::<i32>().unwrap(),
             12323154i32
         );
 
         let double = reader.get_child(3).unwrap();
-        assert_eq!(double.get_name().unwrap(), "double");
+        assert_eq!(double.name(), "double");
         assert_eq!(
             double.expect_scalar()?.read_scalar::<f64>().unwrap(),
             12323154f64
         );
 
         let string = reader.get_child(4).unwrap();
-        assert_eq!(string.get_name().unwrap(), "string");
+        assert_eq!(string.name(), "string");
         assert_eq!(
             string.expect_scalar()?.read_scalar::<String>().unwrap(),
             "hello"
@@ -1091,13 +1091,13 @@ async fn test_opening_legacy_file() -> Result<(), Box<dyn std::error::Error>> {
     let result = OmFileReader::<MmapFile>::from_file(file);
     assert!(result.is_ok());
     let reader = result.unwrap();
-    assert_eq!(reader.get_name(), None);
+    assert_eq!(reader.name(), "");
 
     // Try to open the legacy file and check properties of the reader with async reader
     let file_for_reading = File::open(file)?;
     let read_backend = MmapFile::new(file_for_reading, FileAccessMode::ReadOnly)?;
     let async_reader = OmFileReaderAsync::new(Arc::new(read_backend)).await?;
-    assert_eq!(async_reader.get_name(), None);
+    assert_eq!(async_reader.name(), "");
 
     // Clean up
     remove_file_if_exists(file);
