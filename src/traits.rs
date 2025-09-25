@@ -413,13 +413,9 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
         // TODO: This requires for names to be unique
         let name = self.name();
         if let Some(offset_size) = &self.variable().offset_size {
-            current_path.push(name.to_string());
+            current_path.push(format!("/{}", name));
             // Create hierarchical key
-            let path_str = current_path
-                .iter()
-                .map(|x| x.to_string())
-                .collect::<Vec<_>>()
-                .join("/");
+            let path_str = current_path.join("");
 
             result.insert(path_str, offset_size.clone());
         }
