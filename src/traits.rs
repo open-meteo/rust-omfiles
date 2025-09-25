@@ -3,6 +3,7 @@ use crate::core::c_defaults::{c_error_string, new_data_read, new_index_read};
 use crate::core::data_types::OmDataType;
 use crate::errors::OmFilesError;
 use crate::reader::OmFileReader;
+use crate::reader_async::OmFileReaderAsync;
 use crate::variable::{OmOffsetSize, OmVariableContainer};
 use ndarray::ArrayD;
 use om_file_format_sys::{
@@ -496,5 +497,105 @@ where
         offset_size: OmOffsetSize,
     ) -> Result<OmFileReader<Backend>, OmFilesError> {
         OmFileReadableImpl::init_child_from_offset_size(self, offset_size)
+    }
+}
+
+pub(crate) trait OmFileAsyncReadableImpl<Backend: OmFileReaderBackendAsync>:
+    OmFileVariableImpl + OmFileVariable
+{
+    fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReaderAsync<Backend>;
+    fn backend(&self) -> &Backend;
+
+    async fn get_child_by_index(&self, index: u32) -> Option<OmFileReaderAsync<Backend>> {
+        let mut offset = 0u64;
+        let mut size = 0u64;
+        if !unsafe {
+            om_variable_get_children(*self.variable().variable, index, 1, &mut offset, &mut size)
+        } {
+            return None;
+        }
+
+        let offset_size = OmOffsetSize::new(offset, size);
+        self.init_child_from_offset_size(offset_size).await.ok()
+    }
+
+    async fn get_child_by_name(&self, name: &str) -> Option<OmFileReaderAsync<Backend>> {
+        for i in 0..self.number_of_children() {
+            let child = self.get_child_by_index(i).await;
+            if let Some(child) = child {
+                if child.name() == name {
+                    return Some(child);
+                }
+            }
+        }
+        None
+    }
+
+    async fn init_child_from_offset_size(
+        &self,
+        offset_size: OmOffsetSize,
+    ) -> Result<OmFileReaderAsync<Backend>, OmFilesError> {
+        let child_variable = self
+            .backend()
+            .get_bytes_async(offset_size.offset, offset_size.size)
+            .await?
+            .to_vec();
+
+        Ok(self.new_with_variable(OmVariableContainer::new(child_variable, Some(offset_size))))
+    }
+}
+
+/// Provides navigation capabilities for hierarchical OM file structures.
+///
+/// This trait allows traversing the variable tree, accessing child variables,
+/// and collecting metadata about the entire structure. It's the main interface
+/// for exploring OM file contents.
+pub trait OmFileAsyncReadable<Backend: OmFileReaderBackendAsync>: OmFileVariable {
+    /// Returns a reader for the child variable at the specified index.
+    ///
+    /// Child indices are zero-based and must be less than [`number_of_children()`](OmFileVariable::number_of_children).
+    fn get_child_by_index(
+        &self,
+        index: u32,
+    ) -> impl Future<Output = Option<OmFileReaderAsync<Backend>>>;
+
+    /// Returns a reader for the child variable with the specified name.
+    ///
+    /// Child names are case-sensitive and must match exactly.
+    fn get_child_by_name(
+        &self,
+        name: &str,
+    ) -> impl Future<Output = Option<OmFileReaderAsync<Backend>>>;
+
+    /// Creates a reader for a variable at a specific storage location.
+    ///
+    /// This is typically used internally when navigating the variable hierarchy,
+    /// but can also be used to directly access variables when their storage
+    /// locations are known.
+    fn init_child_from_offset_size(
+        &self,
+        offset_size: OmOffsetSize,
+    ) -> impl Future<Output = Result<OmFileReaderAsync<Backend>, OmFilesError>>;
+}
+
+// Blanket implementation for any OmFileReaderBackend
+impl<T, Backend> OmFileAsyncReadable<Backend> for T
+where
+    T: OmFileAsyncReadableImpl<Backend>,
+    Backend: OmFileReaderBackendAsync,
+{
+    async fn get_child_by_index(&self, index: u32) -> Option<OmFileReaderAsync<Backend>> {
+        OmFileAsyncReadableImpl::get_child_by_index(self, index).await
+    }
+
+    async fn get_child_by_name(&self, name: &str) -> Option<OmFileReaderAsync<Backend>> {
+        OmFileAsyncReadableImpl::get_child_by_name(self, name).await
+    }
+
+    async fn init_child_from_offset_size(
+        &self,
+        offset_size: OmOffsetSize,
+    ) -> Result<OmFileReaderAsync<Backend>, OmFilesError> {
+        OmFileAsyncReadableImpl::init_child_from_offset_size(self, offset_size).await
     }
 }
