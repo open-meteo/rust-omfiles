@@ -201,11 +201,13 @@ impl<T: OmFileVariableImpl> OmFileVariable for T {
 
     fn name(&self) -> &str {
         unsafe {
-            let name = om_file_format_sys::om_variable_get_name(*self.variable().variable);
-            if name.size == 0 {
+            let mut length = 0u16;
+            let name =
+                om_file_format_sys::om_variable_get_name(*self.variable().variable, &mut length);
+            if name.is_null() || length == 0 {
                 return "";
             }
-            let bytes = std::slice::from_raw_parts(name.value as *const u8, name.size as usize);
+            let bytes = std::slice::from_raw_parts(name as *const u8, length as usize);
             str::from_utf8(bytes).unwrap_or_default()
         }
     }
@@ -310,16 +312,20 @@ impl<T: OmArrayVariableImpl> OmArrayVariable for T {
     /// Returns the dimensions of the variable
     fn get_dimensions(&self) -> &[u64] {
         unsafe {
+            let count =
+                om_file_format_sys::om_variable_get_dimensions_count(*self.variable().variable);
             let dims = om_file_format_sys::om_variable_get_dimensions(*self.variable().variable);
-            std::slice::from_raw_parts(dims.values, dims.count as usize)
+            std::slice::from_raw_parts(dims, count as usize)
         }
     }
 
     /// Returns the chunk dimensions of the variable
     fn get_chunk_dimensions(&self) -> &[u64] {
         unsafe {
+            let count =
+                om_file_format_sys::om_variable_get_dimensions_count(*self.variable().variable);
             let chunks = om_file_format_sys::om_variable_get_chunks(*self.variable().variable);
-            std::slice::from_raw_parts(chunks.values, chunks.count as usize)
+            std::slice::from_raw_parts(chunks, count as usize)
         }
     }
 
