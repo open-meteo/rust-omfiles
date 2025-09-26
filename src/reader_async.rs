@@ -2,11 +2,11 @@
 
 use crate::errors::OmFilesError;
 use crate::reader::OmFileScalar;
-use crate::traits::OmFileArrayDataType;
 use crate::traits::{
     OmArrayVariable, OmArrayVariableImpl, OmFileReaderBackendAsync, OmFileVariable,
     OmFileVariableImpl,
 };
+use crate::traits::{OmFileArrayDataType, OmFileAsyncReadableImpl};
 use crate::utils::reader_utils::process_trailer;
 use crate::variable::OmVariableContainer;
 use async_executor::{Executor, Task};
@@ -38,6 +38,21 @@ pub struct OmFileReaderAsync<Backend> {
 impl<Backend: OmFileReaderBackendAsync> OmFileVariableImpl for OmFileReaderAsync<Backend> {
     fn variable(&self) -> &OmVariableContainer {
         &self.variable
+    }
+}
+
+impl<'a, Backend: OmFileReaderBackendAsync> OmFileAsyncReadableImpl<Backend>
+    for OmFileReaderAsync<Backend>
+{
+    fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReaderAsync<Backend> {
+        OmFileReaderAsync {
+            backend: self.backend.clone(),
+            variable,
+        }
+    }
+
+    fn backend(&self) -> &Backend {
+        &self.backend
     }
 }
 
@@ -144,6 +159,21 @@ pub struct OmFileAsyncArray<'a, Backend> {
 impl<'a, Backend: OmFileReaderBackendAsync> OmFileVariableImpl for OmFileAsyncArray<'a, Backend> {
     fn variable(&self) -> &OmVariableContainer {
         self.variable
+    }
+}
+
+impl<'a, Backend: OmFileReaderBackendAsync> OmFileAsyncReadableImpl<Backend>
+    for OmFileAsyncArray<'a, Backend>
+{
+    fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReaderAsync<Backend> {
+        OmFileReaderAsync {
+            backend: self.backend.clone(),
+            variable,
+        }
+    }
+
+    fn backend(&self) -> &Backend {
+        self.backend
     }
 }
 

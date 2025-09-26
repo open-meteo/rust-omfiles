@@ -1,5 +1,6 @@
 use ndarray::ArrayD;
 use omfiles::reader::OmFileReader;
+use omfiles::traits::OmFileWriterBackend;
 use omfiles::writer::OmFileWriter;
 use omfiles::{InMemoryBackend, MmapFile, OmCompressionType, OmFilesError};
 use std::borrow::BorrowMut;
@@ -76,33 +77,25 @@ fn test_not_an_om_file() {
 #[test]
 fn test_mismatching_cube_dimension_length_for_read() {
     let mut backend = InMemoryBackend::new(vec![]);
-
-    {
-        let mut writer = OmFileWriter::new(backend.borrow_mut(), 1024);
-
-        let mut array_writer = writer
-            .prepare_array::<i32>(
-                vec![10, 10],
-                vec![5, 5],
-                OmCompressionType::PforDelta2d,
-                1.0,
-                0.0,
-            )
-            .unwrap();
-
-        let array = ArrayD::from_elem(vec![10, 10], 1);
-        array_writer.write_data(array.view(), None, None).unwrap();
-
-        let variable_meta = array_writer.finalize();
-        let variable = writer.write_array(variable_meta, "data", &[]).unwrap();
-        writer.write_trailer(variable).unwrap();
-    }
+    _ = write_i32_om_file(&mut backend);
 
     let reader = OmFileReader::new(Arc::new(backend)).unwrap();
     let reader = reader.expect_array().unwrap();
     let result = reader.read::<i32>(&[0..10]);
 
     assert_eq!(error_string(result), "Mismatching cube dimension length");
+}
+
+#[test]
+fn test_mismatching_data_type() {
+    let mut backend = InMemoryBackend::new(vec![]);
+    _ = write_i32_om_file(&mut backend);
+
+    let reader = OmFileReader::new(Arc::new(backend)).unwrap();
+    let reader = reader.expect_array().unwrap();
+    let result = reader.read::<f32>(&[0..10, 0..10]);
+
+    assert_eq!(error_string(result), "Invalid data type");
 }
 
 #[test]
@@ -127,6 +120,7 @@ fn test_opening_not_an_om_file() {
     assert!(matches!(result, Err(OmFilesError::NotAnOmFile)));
     remove_file_if_exists(longer_file);
 }
+
 fn error_string<T>(result: Result<T, OmFilesError>) -> String {
     match result {
         Ok(_) => {
@@ -135,4 +129,25 @@ fn error_string<T>(result: Result<T, OmFilesError>) -> String {
         }
         Err(e) => e.to_string(),
     }
+}
+
+fn write_i32_om_file<Backend: OmFileWriterBackend>(backend: Backend) -> Result<(), OmFilesError> {
+    let mut writer = OmFileWriter::new(backend, 1024);
+    let mut array_writer = writer
+        .prepare_array::<i32>(
+            vec![10, 10],
+            vec![5, 5],
+            OmCompressionType::PforDelta2d,
+            1.0,
+            0.0,
+        )
+        .unwrap();
+
+    let array = ArrayD::from_elem(vec![10, 10], 1);
+    array_writer.write_data(array.view(), None, None).unwrap();
+
+    let variable_meta = array_writer.finalize();
+    let variable = writer.write_array(variable_meta, "data", &[]).unwrap();
+    writer.write_trailer(variable).unwrap();
+    Ok(())
 }
