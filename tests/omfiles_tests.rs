@@ -581,7 +581,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         let reader = OmFileReader::from_file(file)?;
         let reader = reader.expect_array()?;
 
-        let all_children_meta = reader.get_flat_variable_metadata();
+        let all_children_meta = reader._get_flat_variable_metadata();
         let expected_metadata = [
             ("/parent/int32", OmOffsetSize::new(3920, 17)),
             ("/parent/double", OmOffsetSize::new(3944, 22)),
@@ -1096,9 +1096,11 @@ async fn test_read_async() -> Result<(), Box<dyn std::error::Error>> {
             string.expect_scalar()?.read_scalar::<String>().unwrap(),
             "hello"
         );
+
+        let no_child = async_reader.get_child_by_name("no_child").await;
+        assert!(no_child.is_none());
     }
 
-    // Clean up
     remove_file_if_exists(file);
     Ok(())
 }
