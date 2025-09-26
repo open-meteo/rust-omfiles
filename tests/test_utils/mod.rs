@@ -1,4 +1,4 @@
-use std::fs;
+use std::fs::{self};
 
 pub fn remove_file_if_exists(file: &str) {
     if fs::metadata(file).is_ok() {

@@ -2,11 +2,13 @@ use macro_rules_attribute::apply;
 use ndarray::{Array2, ArrayD, ArrayViewD, s};
 use om_file_format_sys::{fpxdec32, fpxenc32};
 use omfiles::{
-    FileAccessMode, InMemoryBackend, MmapFile, OmCompressionType, OmFilesError, OmOffsetSize,
+    FileAccessMode, InMemoryBackend, MmapFile, OmCompressionType, OmDataType, OmFilesError,
+    OmOffsetSize,
     reader::OmFileReader,
     reader_async::OmFileReaderAsync,
     traits::{
-        OmArrayVariable, OmFileReadable, OmFileReaderBackend, OmFileVariable, OmScalarVariable,
+        OmArrayVariable, OmFileAsyncReadable as _, OmFileReadable, OmFileReaderBackend,
+        OmFileVariable, OmScalarVariable,
     },
     writer::OmFileWriter,
 };
@@ -75,7 +77,7 @@ fn test_in_memory_int_compression() -> Result<(), Box<dyn std::error::Error>> {
     ];
     let shape: Vec<u64> = vec![1, data.len() as u64];
     let chunks: Vec<u64> = vec![1, 10];
-    let data = ArrayD::from_shape_vec(copy_vec_u64_to_vec_usize(&shape), data).unwrap();
+    let data = ArrayD::from_shape_vec(vec_u64_to_vec_usize(&shape), data).unwrap();
 
     let must_equal = data.clone();
     let mut in_memory_backend = InMemoryBackend::new(vec![]);
@@ -110,7 +112,7 @@ fn test_in_memory_f32_compression() -> Result<(), Box<dyn std::error::Error>> {
     ];
     let shape: Vec<u64> = vec![1, data.len() as u64];
     let chunks: Vec<u64> = vec![1, 10];
-    let data = ArrayD::from_shape_vec(copy_vec_u64_to_vec_usize(&shape), data).unwrap();
+    let data = ArrayD::from_shape_vec(vec_u64_to_vec_usize(&shape), data).unwrap();
 
     let must_equal = data.clone();
     let mut in_memory_backend = InMemoryBackend::new(vec![]);
@@ -173,7 +175,7 @@ fn test_write_large() -> Result<(), Box<dyn std::error::Error>> {
     let add_offset = 0.0;
 
     let data: Vec<f32> = (0..100000).map(|x| (x % 10000) as f32).collect();
-    let data = ArrayD::from_shape_vec(copy_vec_u64_to_vec_usize(&dims), data)?;
+    let data = ArrayD::from_shape_vec(vec_u64_to_vec_usize(&dims), data)?;
 
     {
         let file_handle = File::create(file)?;
@@ -451,7 +453,7 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
     let add_offset = 0.0;
 
     let data = ArrayD::from_shape_vec(
-        copy_vec_u64_to_vec_usize(&dims),
+        vec_u64_to_vec_usize(&dims),
         vec![
             0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0,
             16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0,
@@ -572,106 +574,7 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
 fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
     let file = "test_hierarchical.om";
     remove_file_if_exists(file);
-
-    {
-        let file_handle = File::create(file)?;
-        let mut file_writer = OmFileWriter::new(&file_handle, 8);
-
-        // Create a parent array
-        let parent_dims = vec![3, 3];
-        let parent_chunks = vec![2, 2];
-        let parent_data = ArrayD::from_shape_vec(
-            copy_vec_u64_to_vec_usize(&parent_dims),
-            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
-        )
-        .unwrap();
-
-        // Create sub-child array first (will be child of child1)
-        let subchild_dims = vec![4, 500];
-        let subchild_chunks = vec![2, 2];
-        let subchild_data = ArrayD::from_shape_vec(
-            copy_vec_u64_to_vec_usize(&subchild_dims),
-            vec![(30..2030).map(|x| x as f32).collect::<Vec<f32>>()].concat(),
-        )
-        .unwrap();
-
-        let mut subchild_writer = file_writer.prepare_array::<f32>(
-            subchild_dims.clone(),
-            subchild_chunks.clone(),
-            OmCompressionType::PforDelta2dInt16,
-            1.0,
-            0.0,
-        )?;
-        subchild_writer.write_data(subchild_data.view(), None, None)?;
-        let subchild_meta = subchild_writer.finalize();
-
-        // Create child arrays
-        let child_dims = vec![2, 2];
-        let child_chunks = vec![2, 2];
-        let child1_data = ArrayD::from_shape_vec(
-            copy_vec_u64_to_vec_usize(&child_dims),
-            vec![10.0, 11.0, 12.0, 13.0],
-        )
-        .unwrap();
-        let child2_data = ArrayD::from_shape_vec(
-            copy_vec_u64_to_vec_usize(&child_dims),
-            vec![20.0, 21.0, 22.0, 23.0],
-        )
-        .unwrap();
-
-        // Write child arrays (child1 with subchild)
-        let mut child1_writer = file_writer.prepare_array::<f32>(
-            child_dims.clone(),
-            child_chunks.clone(),
-            OmCompressionType::PforDelta2dInt16,
-            1.0,
-            0.0,
-        )?;
-        child1_writer.write_data(child1_data.view(), None, None)?;
-        let child1_meta = child1_writer.finalize();
-
-        let mut child2_writer = file_writer.prepare_array::<f32>(
-            child_dims.clone(),
-            child_chunks.clone(),
-            OmCompressionType::PforDelta2dInt16,
-            1.0,
-            0.0,
-        )?;
-        child2_writer.write_data(child2_data.view(), None, None)?;
-        let child2_meta = child2_writer.finalize();
-
-        // Write parent array with children
-        let mut parent_writer = file_writer.prepare_array::<f32>(
-            parent_dims,
-            parent_chunks,
-            OmCompressionType::PforDelta2dInt16,
-            1.0,
-            0.0,
-        )?;
-        parent_writer.write_data(parent_data.view(), None, None)?;
-        let parent_meta = parent_writer.finalize();
-
-        // Write meta and attribute information just before the trailer
-        let int32_attribute = file_writer.write_scalar(12323154i32, "int32", &[])?;
-        let double_attribute = file_writer.write_scalar(12323154f64, "double", &[])?;
-        let string_attribute = file_writer.write_scalar("hello".to_string(), "string", &[])?;
-        let subchild_var = file_writer.write_array(subchild_meta, "subchild", &[])?;
-        let child1_var = file_writer.write_array(child1_meta, "child1", &[subchild_var])?;
-        let child2_var = file_writer.write_array(child2_meta, "child2", &[])?;
-        let parent_var = file_writer.write_array(
-            parent_meta,
-            "parent",
-            &[
-                child1_var,
-                child2_var,
-                int32_attribute,
-                double_attribute,
-                string_attribute,
-            ],
-        )?;
-
-        file_writer.write_trailer(parent_var)?;
-    }
+    write_hierarchical_file(&file)?;
 
     {
         // Verify the hierarchical structure
@@ -704,8 +607,6 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         )
         .unwrap();
         assert_eq!(parent, expected_parent);
-
-        // let reader = parent_reader.into_generic_reader();
 
         // Check child1 data and its subchild
         let child1 = reader.get_child_by_index(0).unwrap();
@@ -774,9 +675,7 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
     let scale_factor = 1.0;
     let add_offset = 0.0;
 
-    let data = ArrayD::from_shape_fn(copy_vec_u64_to_vec_usize(&dims), |x| {
-        (x[0] * 5 + x[1]) as f32
-    });
+    let data = ArrayD::from_shape_fn(vec_u64_to_vec_usize(&dims), |x| (x[0] * 5 + x[1]) as f32);
 
     {
         let file_handle = File::create(file)?;
@@ -984,7 +883,7 @@ fn test_write_v3_max_io_limit() -> Result<(), Box<dyn std::error::Error>> {
     let add_offset = 0.0;
     // Define the data to write
     let data = ArrayD::from_shape_vec(
-        copy_vec_u64_to_vec_usize(&dims),
+        vec_u64_to_vec_usize(&dims),
         vec![
             0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0,
             16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0,
@@ -1042,7 +941,7 @@ fn test_nan() -> Result<(), Box<dyn std::error::Error>> {
 
     let shape: Vec<u64> = vec![5, 5];
     let chunks: Vec<u64> = vec![5, 5];
-    let data = ArrayD::from_elem(copy_vec_u64_to_vec_usize(&shape), f32::NAN);
+    let data = ArrayD::from_elem(vec_u64_to_vec_usize(&shape), f32::NAN);
 
     {
         let file_handle = File::create(file)?;
@@ -1109,62 +1008,99 @@ async fn test_read_async() -> Result<(), Box<dyn std::error::Error>> {
     // Setup: Create a test file with multi-dimensional data
     let file = "test_read_async.om";
     remove_file_if_exists(file);
-
-    let dims = vec![10, 10, 10]; // 3D data
-    let chunk_dimensions = vec![4, 4, 4];
-    let compression = OmCompressionType::PforDelta2dInt16;
-    let scale_factor = 1.0;
-    let add_offset = 0.0;
-
-    // Generate test data
-    let data = ArrayD::from_shape_vec(
-        copy_vec_u64_to_vec_usize(&dims),
-        (0..1000).map(|i| i as f32).collect(),
-    )
-    .unwrap();
-
-    // Write the test file
-    {
-        let file_handle = File::create(file)?;
-        let mut file_writer = OmFileWriter::new(&file_handle, 8);
-        let mut writer = file_writer.prepare_array::<f32>(
-            dims.clone(),
-            chunk_dimensions,
-            compression,
-            scale_factor,
-            add_offset,
-        )?;
-
-        writer.write_data(data.view(), None, None)?;
-
-        let variable_meta = writer.finalize();
-        let variable = file_writer.write_array(variable_meta, "data", &[])?;
-        file_writer.write_trailer(variable)?;
-    }
+    write_hierarchical_file(file)?;
 
     // Test async read functionality
     {
         let file_for_reading = File::open(file)?;
         let read_backend = MmapFile::new(file_for_reading, FileAccessMode::ReadOnly)?;
         let async_reader = OmFileReaderAsync::new(Arc::new(read_backend)).await?;
+        assert_eq!(async_reader.name(), "parent");
         let async_reader = async_reader.expect_array()?;
+        // valid for all variables!
+        assert_eq!(async_reader.data_type(), OmDataType::FloatArray);
+        assert_eq!(async_reader.name(), "parent");
+        assert_eq!(async_reader.number_of_children(), 5);
+        // array variable methods
+        assert_eq!(
+            async_reader.compression(),
+            OmCompressionType::PforDelta2dInt16
+        );
+        assert_eq!(async_reader.scale_factor(), 1.0);
+        assert_eq!(async_reader.add_offset(), 0.0);
+        assert_eq!(async_reader.get_dimensions(), &[3, 3]);
+        assert_eq!(async_reader.get_chunk_dimensions(), &[2, 2]);
 
-        let async_data = async_reader.read::<f32>(&[0..10, 0..10, 0..10]).await?;
+        // read data async tests!
+        let async_data = async_reader.read::<f32>(&[0..3, 0..3]).await?;
+        let expected_parent = ArrayD::from_shape_vec(
+            vec![3, 3],
+            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        )
+        .unwrap();
+        assert_eq!(async_data, expected_parent);
 
-        assert_eq!(data, async_data);
+        let partial_async = async_reader.read::<f32>(&[1..2, 0..3]).await?;
+        let partial_async = partial_async.as_slice().unwrap();
+        assert_eq!(&[3.0, 4.0, 5.0], partial_async);
 
-        // Test 2: Read partial data
-        let partial_async = async_reader.read::<f32>(&[2..5, 3..7, 1..3]).await?;
-        assert_eq!(data.slice(s![2..5, 3..7, 1..3]).into_dyn(), partial_async);
+        // child discovery tests
+        let child1 = async_reader.get_child_by_index(0).await.unwrap();
+        assert_eq!(child1.name(), "child1");
+        let child1_data = child1.expect_array()?.read::<f32>(&[0..2, 0..2]).await?;
+        let expected_child1 =
+            ArrayD::from_shape_vec(vec![2, 2], vec![10.0, 11.0, 12.0, 13.0]).unwrap();
+        assert_eq!(child1_data, expected_child1);
+
+        // Check child1's subchild
+        assert_eq!(child1.number_of_children(), 1);
+        let subchild = child1.get_child_by_index(0).await.unwrap();
+        assert_eq!(subchild.name(), "subchild");
+        let subchild_data = subchild
+            .expect_array()?
+            .read::<f32>(&[0..4, 0..500])
+            .await?;
+        let expected_subchild = ArrayD::from_shape_vec(
+            vec![4, 500],
+            vec![(30..2030).map(|x| x as f32).collect::<Vec<f32>>()].concat(),
+        )
+        .unwrap();
+        assert_eq!(subchild_data, expected_subchild);
+
+        let child2 = async_reader.get_child_by_name("child2").await.unwrap();
+        assert_eq!(child2.name(), "child2");
+        assert_eq!(child2.number_of_children(), 0);
+        let child2_data = child2.expect_array()?.read::<f32>(&[0..2, 0..2]).await?;
+        let expected_child2 =
+            ArrayD::from_shape_vec(vec![2, 2], vec![20.0, 21.0, 22.0, 23.0]).unwrap();
+        assert_eq!(child2_data, expected_child2);
+
+        // Check attributes
+        let int32 = async_reader.get_child_by_index(2).await.unwrap();
+        assert_eq!(int32.name(), "int32");
+        assert_eq!(
+            int32.expect_scalar()?.read_scalar::<i32>().unwrap(),
+            12323154i32
+        );
+
+        let double = async_reader.get_child_by_index(3).await.unwrap();
+        assert_eq!(double.name(), "double");
+        assert_eq!(
+            double.expect_scalar()?.read_scalar::<f64>().unwrap(),
+            12323154f64
+        );
+
+        let string = async_reader.get_child_by_index(4).await.unwrap();
+        assert_eq!(string.name(), "string");
+        assert_eq!(
+            string.expect_scalar()?.read_scalar::<String>().unwrap(),
+            "hello"
+        );
     }
 
     // Clean up
     remove_file_if_exists(file);
     Ok(())
-}
-
-fn copy_vec_u64_to_vec_usize(input: &Vec<u64>) -> Vec<usize> {
-    input.iter().map(|&x| x as usize).collect()
 }
 
 fn nd_assert_eq_with_nan(expected: &ArrayD<f32>, actual: &ArrayD<f32>) {
@@ -1189,4 +1125,112 @@ fn nd_assert_eq_with_accuracy_and_nan(
             );
         }
     }
+}
+
+fn vec_u64_to_vec_usize(input: &Vec<u64>) -> Vec<usize> {
+    input.iter().map(|&x| x as usize).collect()
+}
+
+fn write_hierarchical_file<P>(file: P) -> Result<(), Box<dyn std::error::Error>>
+where
+    P: AsRef<std::path::Path>,
+{
+    let file_handle = File::create(file)?;
+    let mut file_writer = OmFileWriter::new(&file_handle, 8);
+
+    // Create a parent array
+    let parent_dims = vec![3, 3];
+    let parent_chunks = vec![2, 2];
+    let parent_data = ArrayD::from_shape_vec(
+        vec_u64_to_vec_usize(&parent_dims),
+        vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+    )
+    .unwrap();
+
+    // Create sub-child array first (will be child of child1)
+    let subchild_dims = vec![4, 500];
+    let subchild_chunks = vec![2, 2];
+    let subchild_data = ArrayD::from_shape_vec(
+        vec_u64_to_vec_usize(&subchild_dims),
+        vec![(30..2030).map(|x| x as f32).collect::<Vec<f32>>()].concat(),
+    )
+    .unwrap();
+
+    let mut subchild_writer = file_writer.prepare_array::<f32>(
+        subchild_dims.clone(),
+        subchild_chunks.clone(),
+        OmCompressionType::PforDelta2dInt16,
+        1.0,
+        0.0,
+    )?;
+    subchild_writer.write_data(subchild_data.view(), None, None)?;
+    let subchild_meta = subchild_writer.finalize();
+
+    // Create child arrays
+    let child_dims = vec![2, 2];
+    let child_chunks = vec![2, 2];
+    let child1_data = ArrayD::from_shape_vec(
+        vec_u64_to_vec_usize(&child_dims),
+        vec![10.0, 11.0, 12.0, 13.0],
+    )
+    .unwrap();
+    let child2_data = ArrayD::from_shape_vec(
+        vec_u64_to_vec_usize(&child_dims),
+        vec![20.0, 21.0, 22.0, 23.0],
+    )
+    .unwrap();
+
+    // Write child arrays (child1 with subchild)
+    let mut child1_writer = file_writer.prepare_array::<f32>(
+        child_dims.clone(),
+        child_chunks.clone(),
+        OmCompressionType::PforDelta2dInt16,
+        1.0,
+        0.0,
+    )?;
+    child1_writer.write_data(child1_data.view(), None, None)?;
+    let child1_meta = child1_writer.finalize();
+
+    let mut child2_writer = file_writer.prepare_array::<f32>(
+        child_dims.clone(),
+        child_chunks.clone(),
+        OmCompressionType::PforDelta2dInt16,
+        1.0,
+        0.0,
+    )?;
+    child2_writer.write_data(child2_data.view(), None, None)?;
+    let child2_meta = child2_writer.finalize();
+
+    // Write parent array with children
+    let mut parent_writer = file_writer.prepare_array::<f32>(
+        parent_dims,
+        parent_chunks,
+        OmCompressionType::PforDelta2dInt16,
+        1.0,
+        0.0,
+    )?;
+    parent_writer.write_data(parent_data.view(), None, None)?;
+    let parent_meta = parent_writer.finalize();
+
+    // Write meta and attribute information just before the trailer
+    let int32_attribute = file_writer.write_scalar(12323154i32, "int32", &[])?;
+    let double_attribute = file_writer.write_scalar(12323154f64, "double", &[])?;
+    let string_attribute = file_writer.write_scalar("hello".to_string(), "string", &[])?;
+    let subchild_var = file_writer.write_array(subchild_meta, "subchild", &[])?;
+    let child1_var = file_writer.write_array(child1_meta, "child1", &[subchild_var])?;
+    let child2_var = file_writer.write_array(child2_meta, "child2", &[])?;
+    let parent_var = file_writer.write_array(
+        parent_meta,
+        "parent",
+        &[
+            child1_var,
+            child2_var,
+            int32_attribute,
+            double_attribute,
+            string_attribute,
+        ],
+    )?;
+
+    file_writer.write_trailer(parent_var)?;
+    Ok(())
 }

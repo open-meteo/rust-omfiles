@@ -127,6 +127,7 @@ fn test_opening_not_an_om_file() {
     assert!(matches!(result, Err(OmFilesError::NotAnOmFile)));
     remove_file_if_exists(longer_file);
 }
+
 fn error_string<T>(result: Result<T, OmFilesError>) -> String {
     match result {
         Ok(_) => {
