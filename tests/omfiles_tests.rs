@@ -3,7 +3,6 @@ use ndarray::{Array2, ArrayD, ArrayViewD, s};
 use om_file_format_sys::{fpxdec32, fpxenc32};
 use omfiles::{
     FileAccessMode, InMemoryBackend, MmapFile, OmCompressionType, OmDataType, OmFilesError,
-    OmOffsetSize,
     reader::OmFileReader,
     reader_async::OmFileReaderAsync,
     traits::{
@@ -15,7 +14,6 @@ use omfiles::{
 use smol_macros::test;
 use std::{
     borrow::BorrowMut,
-    collections::HashMap,
     f32::{self},
     fs::{self, File},
     sync::Arc,
@@ -581,21 +579,26 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         let reader = OmFileReader::from_file(file)?;
         let reader = reader.expect_array()?;
 
-        let all_children_meta = reader._get_flat_variable_metadata();
-        let expected_metadata = [
-            ("/parent/int32", OmOffsetSize::new(3920, 17)),
-            ("/parent/double", OmOffsetSize::new(3944, 22)),
-            ("/parent/string", OmOffsetSize::new(3968, 27)),
-            ("/parent/child1/subchild", OmOffsetSize::new(4000, 80)),
-            ("/parent/child1", OmOffsetSize::new(4080, 94)),
-            ("/parent/child2", OmOffsetSize::new(4176, 78)),
-            ("/parent", OmOffsetSize::new(4256, 158)),
-        ]
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.clone()))
-        .collect::<HashMap<String, OmOffsetSize>>();
-
-        assert_eq!(all_children_meta, expected_metadata);
+        #[cfg(feature = "metadata-tree")]
+        {
+            use omfiles::OmOffsetSize;
+            use omfiles::traits::OmFileVariableMetadataTree;
+            use std::collections::HashMap;
+            let all_children_meta = reader._get_flat_variable_metadata();
+            let expected_metadata = [
+                ("/parent/int32", OmOffsetSize::new(3920, 17)),
+                ("/parent/double", OmOffsetSize::new(3944, 22)),
+                ("/parent/string", OmOffsetSize::new(3968, 27)),
+                ("/parent/child1/subchild", OmOffsetSize::new(4000, 80)),
+                ("/parent/child1", OmOffsetSize::new(4080, 94)),
+                ("/parent/child2", OmOffsetSize::new(4176, 78)),
+                ("/parent", OmOffsetSize::new(4256, 158)),
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect::<HashMap<String, OmOffsetSize>>();
+            assert_eq!(all_children_meta, expected_metadata);
+        }
 
         // Check parent data
         // Check number of children at root level

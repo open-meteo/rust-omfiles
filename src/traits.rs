@@ -10,6 +10,7 @@ use om_file_format_sys::{
     OmDecoder_t, OmError_t, om_decoder_decode_chunks, om_decoder_next_data_read,
     om_decoder_next_index_read, om_variable_get_children,
 };
+#[cfg(feature = "metadata-tree")]
 use std::collections::HashMap;
 use std::future::Future;
 use std::ops::{Deref, Range};
@@ -413,6 +414,7 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
         Ok(self.new_with_variable(OmVariableContainer::new(child_variable, Some(offset_size))))
     }
 
+    #[cfg(feature = "metadata-tree")]
     /// Helper function that recursively collects variable metadata
     fn collect_variable_metadata(
         &self,
@@ -422,7 +424,7 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
         // Add current variable's metadata if it has a name and offset_size
         // TODO: This requires for names to be unique
         let name = self.name();
-        if let Some(offset_size) = &self.variable().offset_size {
+        if let Some(offset_size) = &self.variable()._offset_size {
             current_path.push(format!("/{}", name));
             // Create hierarchical key
             let path_str = current_path.join("");
@@ -447,6 +449,33 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
 /// and collecting metadata about the entire structure. It's the main interface
 /// for exploring OM file contents.
 pub trait OmFileReadable<Backend: OmFileReaderBackend>: OmFileVariable {
+    /// Returns a reader for the child variable at the specified index.
+    ///
+    /// Child indices are zero-based and must be less than [`number_of_children()`](OmFileVariable::number_of_children).
+    fn get_child_by_index(&self, index: u32) -> Option<OmFileReader<Backend>>;
+
+    /// Returns a reader for the child variable with the specified name.
+    ///
+    /// Child names are case-sensitive and must match exactly.
+    fn get_child_by_name(&self, name: &str) -> Option<OmFileReader<Backend>>;
+}
+
+impl<T, Backend> OmFileReadable<Backend> for T
+where
+    T: OmFileReadableImpl<Backend>,
+    Backend: OmFileReaderBackend,
+{
+    fn get_child_by_index(&self, index: u32) -> Option<OmFileReader<Backend>> {
+        OmFileReadableImpl::get_child_by_index(self, index)
+    }
+
+    fn get_child_by_name(&self, name: &str) -> Option<OmFileReader<Backend>> {
+        OmFileReadableImpl::get_child_by_name(self, name)
+    }
+}
+
+#[cfg(feature = "metadata-tree")]
+pub trait OmFileVariableMetadataTree<Backend: OmFileReaderBackend> {
     /// Collects metadata for all variables in the hierarchy.
     ///
     /// This method traverses the entire variable tree and returns a mapping
@@ -460,25 +489,19 @@ pub trait OmFileReadable<Backend: OmFileReaderBackend>: OmFileVariable {
     /// in the backend.
     fn _get_flat_variable_metadata(&self) -> HashMap<String, OmOffsetSize>;
 
-    /// Returns a reader for the child variable at the specified index.
+    /// Creates a reader for a variable at a specific storage location.
     ///
-    /// Child indices are zero-based and must be less than [`number_of_children()`](OmFileVariable::number_of_children).
-    fn get_child_by_index(&self, index: u32) -> Option<OmFileReader<Backend>>;
-
-    /// Returns a reader for the child variable with the specified name.
-    ///
-    /// Child names are case-sensitive and must match exactly.
-    fn get_child_by_name(&self, name: &str) -> Option<OmFileReader<Backend>>;
-
-    ///
+    /// This is typically used internally when navigating the variable hierarchy,
+    /// but can also be used to directly access variables when their storage
+    /// locations are known.
     fn _init_child_from_offset_size(
         &self,
         offset_size: OmOffsetSize,
     ) -> Result<OmFileReader<Backend>, OmFilesError>;
 }
 
-// Blanket implementation for any OmFileReaderBackend
-impl<T, Backend> OmFileReadable<Backend> for T
+#[cfg(feature = "metadata-tree")]
+impl<T, Backend> OmFileVariableMetadataTree<Backend> for T
 where
     T: OmFileReadableImpl<Backend>,
     Backend: OmFileReaderBackend,
@@ -487,14 +510,6 @@ where
         let mut result = HashMap::new();
         self.collect_variable_metadata(Vec::new(), &mut result);
         result
-    }
-
-    fn get_child_by_index(&self, index: u32) -> Option<OmFileReader<Backend>> {
-        OmFileReadableImpl::get_child_by_index(self, index)
-    }
-
-    fn get_child_by_name(&self, name: &str) -> Option<OmFileReader<Backend>> {
-        OmFileReadableImpl::get_child_by_name(self, name)
     }
 
     fn _init_child_from_offset_size(

@@ -12,6 +12,8 @@ The file format is documented in the [open-meteo/om-file-format](https://github.
 
 ```bash
 cargo test
+# docs
+RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --all-features
 ```
 
 ## Reading files

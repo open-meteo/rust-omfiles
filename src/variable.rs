@@ -46,7 +46,7 @@ pub(crate) struct OmVariableContainer {
     /// Holds the raw data backing the variable
     pub(crate) _data: Vec<u8>,
     /// Offset and size information for the variable
-    pub(crate) offset_size: Option<OmOffsetSize>,
+    pub(crate) _offset_size: Option<OmOffsetSize>,
     /// Opaque pointer to the variable defined by header/trailer
     pub(crate) variable: OmVariablePtr,
 }
@@ -57,7 +57,7 @@ impl OmVariableContainer {
         let variable_ptr = unsafe { om_variable_init(data.as_ptr() as *const c_void) };
         Self {
             _data: data,
-            offset_size,
+            _offset_size: offset_size,
             variable: OmVariablePtr(variable_ptr),
         }
     }
