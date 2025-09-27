@@ -22,7 +22,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 memmap2 = "0.9.7"
-om-file-format-sys = { git = "https://github.com/open-meteo/om-file-format", rev = "57c45a291314fae44db1b07abd9c5043146fc0d0" }
+om-file-format-sys = { git = "https://github.com/open-meteo/om-file-format", rev = "9e8b847e5cd29f23871f74f5797f39b9ab6afa2f" }
 ndarray = "0.16.1"
 num-traits = "0.2.19"
 thiserror = "2.0.12"
@@ -38,3 +38,9 @@ macro_rules_attribute = "0.2.2"
 [[bench]]
 name = "om_benchmark"
 harness = false
+
+[features]
+metadata-tree = []
+
+[package.metadata.docs.rs]
+all-features = true
