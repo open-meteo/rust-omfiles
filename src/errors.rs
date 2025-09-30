@@ -1,7 +1,8 @@
 use thiserror::Error;
 
+/// Errors thrown by the OmFiles library.
 #[derive(Error, Debug, PartialEq)]
-pub enum OmFilesRsError {
+pub enum OmFilesError {
     #[error("Cannot open file '{filename}': errno {errno}, error: {error}")]
     CannotOpenFile {
         filename: String,
@@ -49,4 +50,6 @@ pub enum OmFilesRsError {
     ArrayNotContiguous,
     #[error("Task Error: {0}")]
     TaskError(String),
+    #[error("Generic error: {0}")]
+    GenericError(String),
 }
