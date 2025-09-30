@@ -28,9 +28,13 @@ num-traits = "0.2.19"
 thiserror = "2.0.12"
 async-lock = "3.4.1"
 async-executor = "1.13.2"
+io-uring = "0.6.0"
+oneshot = "0.1.11"
+smol = "2.0.2"
+flume = "0.11.1"
 
 [dev-dependencies]
-criterion = "0.7"
+criterion = { version = "0.7", features = ["async_smol"] }
 rand = "0.9"
 smol-macros = "0.1.1"
 macro_rules_attribute = "0.2.2"
