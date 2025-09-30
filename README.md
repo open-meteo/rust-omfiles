@@ -1,4 +1,4 @@
-# omfiles-rs
+# rust-omfiles
 
 [![codecov](https://codecov.io/github/open-meteo/rust-omfiles/graph/badge.svg?token=ZCOQN3ZKHP)](https://codecov.io/github/open-meteo/rust-omfiles)
 [![Test](https://github.com/open-meteo/rust-omfiles/actions/workflows/tests.yml/badge.svg)](https://github.com/open-meteo/rust-omfiles/actions/workflows/tests.yml)
@@ -12,6 +12,8 @@ The file format is documented in the [open-meteo/om-file-format](https://github.
 
 ```bash
 cargo test
+# docs
+RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --all-features
 ```
 
 ## Reading files

@@ -1,32 +1,38 @@
-//! omfiles-rs: A Rust library for working with Om files
+//! omfiles is a Rust library for working with the Open-Meteo file format.
 //!
-//! This library provides functionality for reading and writing Om file format.
+//! This library provides functionality for reading and writing OM file format.
 //!
-pub mod io {
-    pub(crate) mod buffered_writer;
-    pub mod reader;
-    pub mod reader_async;
-    pub mod reader_async_io_uring;
-    pub(crate) mod reader_utils;
-    pub(crate) mod variable;
-    #[macro_use]
-    pub(crate) mod variable_impl;
-    pub mod wrapped_decoder;
-    pub mod writer;
-}
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
-pub mod core {
+pub mod reader;
+pub mod reader_async;
+pub mod traits;
+mod variable;
+pub mod writer;
+pub(crate) mod backends {
+    mod file;
+    pub mod io_uring;
+    pub mod memory;
+    pub mod mmapfile;
+}
+mod core {
     pub mod c_defaults;
     pub mod compression;
     pub mod data_types;
 }
-
-pub mod backend {
-    pub mod backends;
-    pub mod mmapfile;
-    pub mod io_uring;
+pub(crate) mod utils {
+    pub mod buffered_writer;
+    pub mod reader_utils;
+    pub mod wrapped_decoder;
 }
+mod errors;
 
-pub mod errors;
+pub use backends::io_uring::IoUringBackend;
+pub use backends::memory::InMemoryBackend;
+pub use backends::mmapfile::{FileAccessMode, MmapFile};
+pub use core::compression::OmCompressionType;
+pub use core::data_types::OmDataType;
+#[cfg(feature = "metadata-tree")]
+pub use variable::OmOffsetSize;
 
-mod utils;
+pub use errors::OmFilesError;

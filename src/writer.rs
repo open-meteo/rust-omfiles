@@ -1,9 +1,14 @@
-use crate::backend::backends::OmFileWriterBackend;
+//! Writer-related structs for OmFile format.
+
+use crate::OmDataType;
 use crate::core::c_defaults::{c_error_string, create_uninit_encoder};
-use crate::core::compression::CompressionType;
-use crate::core::data_types::{DataType, OmFileArrayDataType, OmFileScalarDataType, OmNone};
-use crate::errors::OmFilesRsError;
-use crate::io::buffered_writer::OmBufferedWriter;
+use crate::core::compression::OmCompressionType;
+use crate::core::data_types::OmNone;
+use crate::errors::OmFilesError;
+use crate::traits::OmFileWriterBackend;
+use crate::traits::{OmFileArrayDataType, OmFileScalarDataType};
+use crate::utils::buffered_writer::OmBufferedWriter;
+use crate::variable::OmOffsetSize;
 use ndarray::ArrayViewD;
 use om_file_format_sys::{
     OmEncoder_t, OmError_t, om_encoder_chunk_buffer_size, om_encoder_compress_chunk,
@@ -16,18 +21,7 @@ use std::borrow::BorrowMut;
 use std::marker::PhantomData;
 use std::os::raw::c_void;
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct OmOffsetSize {
-    pub offset: u64,
-    pub size: u64,
-}
-
-impl OmOffsetSize {
-    pub fn new(offset: u64, size: u64) -> Self {
-        Self { offset, size }
-    }
-}
-
+/// Writer for OmFile format.
 pub struct OmFileWriter<Backend: OmFileWriterBackend> {
     buffer: OmBufferedWriter<Backend>,
 }
@@ -39,7 +33,7 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         }
     }
 
-    pub fn write_header_if_required(&mut self) -> Result<(), OmFilesRsError> {
+    fn write_header_if_required(&mut self) -> Result<(), OmFilesError> {
         if self.buffer.total_bytes_written > 0 {
             return Ok(());
         }
@@ -57,7 +51,7 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         value: T,
         name: &str,
         children: &[OmOffsetSize],
-    ) -> Result<OmOffsetSize, OmFilesRsError> {
+    ) -> Result<OmOffsetSize, OmFilesError> {
         self.write_header_if_required()?;
 
         assert!(name.len() <= u16::MAX as usize);
@@ -66,11 +60,11 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         let type_scalar = T::DATA_TYPE_SCALAR.to_c();
         let children_offsets: Vec<u64> = children.iter().map(|c| c.offset).collect();
         let children_sizes: Vec<u64> = children.iter().map(|c| c.size).collect();
-        // Align to 64 bytes before writing
-        self.buffer.align_to_64_bytes()?;
+        // Align to 8 bytes before writing
+        self.buffer.align_to_8_bytes()?;
         let offset = self.buffer.total_bytes_written as u64;
 
-        let size = value.with_raw_bytes(|bytes| -> Result<usize, OmFilesRsError> {
+        let size = value.with_raw_bytes(|bytes| -> Result<usize, OmFilesError> {
             let size = unsafe {
                 om_variable_write_scalar_size(
                     name.len() as u16,
@@ -108,19 +102,19 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         &mut self,
         name: &str,
         children: &[OmOffsetSize],
-    ) -> Result<OmOffsetSize, OmFilesRsError> {
+    ) -> Result<OmOffsetSize, OmFilesError> {
         // Use write_scalar with OmNone
         self.write_scalar(OmNone::default(), name, children)
     }
 
-    pub fn prepare_array<T: OmFileArrayDataType>(
-        &mut self,
+    pub fn prepare_array<'a, T: OmFileArrayDataType>(
+        &'a mut self,
         dimensions: Vec<u64>,
         chunk_dimensions: Vec<u64>,
-        compression: CompressionType,
+        compression: OmCompressionType,
         scale_factor: f32,
         add_offset: f32,
-    ) -> Result<OmFileWriterArray<T, Backend>, OmFilesRsError> {
+    ) -> Result<OmFileWriterArray<'a, T, Backend>, OmFilesError> {
         let _ = &self.write_header_if_required()?;
 
         let array_writer = OmFileWriterArray::new(
@@ -141,7 +135,7 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         array: OmFileWriterArrayFinalized,
         name: &str,
         children: &[OmOffsetSize],
-    ) -> Result<OmOffsetSize, OmFilesRsError> {
+    ) -> Result<OmOffsetSize, OmFilesError> {
         self.write_header_if_required()?;
 
         debug_assert!(name.len() <= u16::MAX as usize);
@@ -154,7 +148,7 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
                 array.dimensions.len() as u64,
             )
         };
-        self.buffer.align_to_64_bytes()?;
+        self.buffer.align_to_8_bytes()?;
 
         let offset = self.buffer.total_bytes_written as u64;
 
@@ -186,9 +180,9 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
         Ok(OmOffsetSize::new(offset, size as u64))
     }
 
-    pub fn write_trailer(&mut self, root_variable: OmOffsetSize) -> Result<(), OmFilesRsError> {
+    pub fn write_trailer(&mut self, root_variable: OmOffsetSize) -> Result<(), OmFilesError> {
         self.write_header_if_required()?;
-        self.buffer.align_to_64_bytes()?;
+        self.buffer.align_to_8_bytes()?;
 
         let size = unsafe { om_trailer_size() };
         self.buffer.reallocate(size)?;
@@ -205,13 +199,19 @@ impl<Backend: OmFileWriterBackend> OmFileWriter<Backend> {
     }
 }
 
+/// The OmFileWriterArray allows streaming large nd-arrays to an OmFile.
+///
+/// After writing the complete array to the file, you need to call the [`finalize()`](Self::finalize)
+/// method to write the lookup table.
+/// The [`OmFileWriterArrayFinalized`] then needs to be referenced in the final OmFile
+/// as root variable or as child variable of another variable.
 pub struct OmFileWriterArray<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend> {
     look_up_table: Vec<u64>,
     encoder: OmEncoder_t,
     chunk_index: u64,
     scale_factor: f32,
     add_offset: f32,
-    compression: CompressionType,
+    compression: OmCompressionType,
     data_type: PhantomData<OmType>,
     dimensions: Vec<u64>,
     chunks: Vec<u64>,
@@ -223,21 +223,20 @@ pub struct OmFileWriterArray<'a, OmType: OmFileArrayDataType, Backend: OmFileWri
 impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
     OmFileWriterArray<'a, OmType, Backend>
 {
-    /// `lut_chunk_element_count` should be 256 for production files.
     pub fn new(
         dimensions: Vec<u64>,
         chunk_dimensions: Vec<u64>,
-        compression: CompressionType,
-        data_type: DataType,
+        compression: OmCompressionType,
+        data_type: OmDataType,
         scale_factor: f32,
         add_offset: f32,
         buffer: &'a mut OmBufferedWriter<Backend>,
-    ) -> Result<Self, OmFilesRsError> {
+    ) -> Result<Self, OmFilesError> {
         if data_type != OmType::DATA_TYPE_ARRAY {
-            return Err(OmFilesRsError::InvalidDataType);
+            return Err(OmFilesError::InvalidDataType);
         }
         if dimensions.len() != chunk_dimensions.len() {
-            return Err(OmFilesRsError::MismatchingCubeDimensionLength);
+            return Err(OmFilesError::MismatchingCubeDimensionLength);
         }
 
         let chunks = chunk_dimensions;
@@ -256,7 +255,7 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
             )
         };
         if error != OmError_t::ERROR_OK {
-            return Err(OmFilesRsError::FileWriterError {
+            return Err(OmFilesError::FileWriterError {
                 errno: error as i32,
                 error: c_error_string(error),
             });
@@ -292,48 +291,48 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
         array: ArrayViewD<OmType>,
         array_offset: Option<&[u64]>,
         array_count: Option<&[u64]>,
-    ) -> Result<(), OmFilesRsError> {
+    ) -> Result<(), OmFilesError> {
         let array_dimensions = array
             .shape()
             .iter()
             .map(|&x| x as u64)
             .collect::<Vec<u64>>();
-        let array = array.as_slice().ok_or(OmFilesRsError::ArrayNotContiguous)?;
+        let array = array.as_slice().ok_or(OmFilesError::ArrayNotContiguous)?;
         self.write_data_flat(array, Some(&array_dimensions), array_offset, array_count)
     }
 
     /// Compresses data and writes it to file.
-    pub fn write_data_flat(
+    fn write_data_flat(
         &mut self,
         array: &[OmType],
         array_dimensions: Option<&[u64]>,
         array_offset: Option<&[u64]>,
         array_count: Option<&[u64]>,
-    ) -> Result<(), OmFilesRsError> {
+    ) -> Result<(), OmFilesError> {
         let array_dimensions = array_dimensions.unwrap_or(&self.dimensions);
         let default_offset = vec![0; array_dimensions.len()];
         let array_offset = array_offset.unwrap_or(default_offset.as_slice());
         let array_count = array_count.unwrap_or(array_dimensions);
 
         if array_count.len() != self.dimensions.len() {
-            return Err(OmFilesRsError::ChunkHasWrongNumberOfElements);
+            return Err(OmFilesError::ChunkHasWrongNumberOfElements);
         }
         for (array_dim, max_dim) in array_count.iter().zip(self.dimensions.iter()) {
             if array_dim > max_dim {
-                return Err(OmFilesRsError::ChunkHasWrongNumberOfElements);
+                return Err(OmFilesError::ChunkHasWrongNumberOfElements);
             }
         }
 
         let array_size: u64 = array_dimensions.iter().product::<u64>();
         if array.len() as u64 != array_size {
-            return Err(OmFilesRsError::ChunkHasWrongNumberOfElements);
+            return Err(OmFilesError::ChunkHasWrongNumberOfElements);
         }
         for (dim, (offset, count)) in array_dimensions
             .iter()
             .zip(array_offset.iter().zip(array_count.iter()))
         {
             if offset + count > *dim {
-                return Err(OmFilesRsError::OffsetAndCountExceedDimension {
+                return Err(OmFilesError::OffsetAndCountExceedDimension {
                     offset: *offset,
                     count: *count,
                     dimension: *dim,
@@ -384,7 +383,7 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
     }
 
     /// Compress the lookup table and write it to the output buffer.
-    pub fn write_lut(&mut self) -> u64 {
+    fn write_lut(&mut self) -> u64 {
         let buffer_size = unsafe {
             om_encoder_lut_buffer_size(self.look_up_table.as_ptr(), self.look_up_table.len() as u64)
         };
@@ -425,13 +424,244 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
     }
 }
 
+/// An array variable that has already been written to the file.
+///
+/// The [`OmFileWriterArrayFinalized`] struct contains information about the array variable,
+/// by which it can later be identified in the file.
 pub struct OmFileWriterArrayFinalized {
-    pub scale_factor: f32,
-    pub add_offset: f32,
-    pub compression: CompressionType,
-    pub data_type: DataType,
-    pub dimensions: Vec<u64>,
-    pub chunks: Vec<u64>,
-    pub lut_size: u64,
-    pub lut_offset: u64,
+    scale_factor: f32,
+    add_offset: f32,
+    compression: OmCompressionType,
+    data_type: OmDataType,
+    dimensions: Vec<u64>,
+    chunks: Vec<u64>,
+    lut_size: u64,
+    lut_offset: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{ptr, slice, sync::Arc};
+
+    use om_file_format_sys::{
+        om_variable_get_children_count, om_variable_get_scalar, om_variable_get_type,
+        om_variable_init,
+    };
+
+    use crate::{
+        backends::memory::InMemoryBackend,
+        reader::OmFileReader,
+        traits::{OmFileReadable, OmFileVariable, OmScalarVariable},
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_variable() {
+        let name = "name";
+
+        // Calculate size needed for scalar variable
+        let size_scalar = unsafe {
+            om_variable_write_scalar_size(name.len() as u16, 0, OmDataType::Int8.to_c(), 0)
+        };
+
+        assert_eq!(size_scalar, 13);
+
+        // Create buffer for the variable
+        let mut data = vec![255u8; size_scalar];
+        let value: u8 = 177;
+
+        // Write the scalar variable
+        unsafe {
+            om_variable_write_scalar(
+                data.as_mut_ptr() as *mut std::os::raw::c_void,
+                name.len() as u16,
+                0,
+                ptr::null(),
+                ptr::null(),
+                name.as_ptr() as *const ::std::os::raw::c_char,
+                OmDataType::Int8.to_c(),
+                &value as *const u8 as *const std::os::raw::c_void,
+                0,
+            );
+        }
+
+        assert_eq!(data, [1, 4, 4, 0, 0, 0, 0, 0, 177, 110, 97, 109, 101]);
+
+        // Initialize a variable from the data
+        let om_variable = unsafe { om_variable_init(data.as_ptr() as *const c_void) };
+
+        // Verify the variable type and children count
+        unsafe {
+            assert_eq!(om_variable_get_type(om_variable), OmDataType::Int8.to_c());
+            assert_eq!(om_variable_get_children_count(om_variable), 0);
+        }
+
+        // Get the scalar value
+        let mut ptr: *mut std::os::raw::c_void = ptr::null_mut();
+        let mut size: u64 = 0;
+
+        let error = unsafe { om_variable_get_scalar(om_variable, &mut ptr, &mut size) };
+
+        // Verify successful retrieval and the value
+        assert_eq!(error, OmError_t::ERROR_OK);
+        assert!(!ptr.is_null());
+
+        let result_value = unsafe { *(ptr as *const u8) };
+        assert_eq!(result_value, value);
+    }
+
+    #[test]
+    fn test_variable_string() {
+        let name = "name";
+        let value = "Hello, World!";
+
+        // Calculate size for string scalar
+        let size_scalar = unsafe {
+            om_variable_write_scalar_size(
+                name.len() as u16,
+                0,
+                OmDataType::String.to_c(),
+                value.len() as u64,
+            )
+        };
+
+        assert_eq!(size_scalar, 33);
+
+        // Create buffer for the variable
+        let mut data = vec![255u8; size_scalar];
+
+        // Write the string scalar
+        unsafe {
+            om_variable_write_scalar(
+                data.as_mut_ptr() as *mut std::os::raw::c_void,
+                name.len() as u16,
+                0,
+                ptr::null(),
+                ptr::null(),
+                name.as_ptr() as *const ::std::os::raw::c_char,
+                OmDataType::String.to_c(),
+                value.as_ptr() as *const std::os::raw::c_void,
+                value.len(),
+            );
+        }
+
+        // Verify the written data
+        let expected = [
+            11, // OmDataType_t: 11 = DATA_TYPE_STRING
+            4,  // OmCompression_t: 4 = COMPRESSION_NONE
+            4, 0, // Size of name
+            0, 0, 0, 0, // Children count
+            13, 0, 0, 0, 0, 0, 0, 0, // stringSize
+            72, 101, 108, 108, 111, 44, 32, 87, 111, 114, 108, 100, 33, // "Hello, World!"
+            110, 97, 109, 101, // "name"
+        ];
+
+        assert_eq!(data, expected);
+
+        // Initialize a variable from the data
+        let om_variable = unsafe { om_variable_init(data.as_ptr() as *const c_void) };
+
+        // Verify the variable type and children count
+        unsafe {
+            assert_eq!(om_variable_get_type(om_variable), OmDataType::String.to_c());
+            assert_eq!(om_variable_get_children_count(om_variable), 0);
+        }
+
+        // Get the scalar value
+        let mut ptr: *mut std::os::raw::c_void = ptr::null_mut();
+        let mut size: u64 = 0;
+
+        let error = unsafe { om_variable_get_scalar(om_variable, &mut ptr, &mut size) };
+
+        // Verify successful retrieval and the value
+        assert_eq!(error, OmError_t::ERROR_OK);
+        assert!(!ptr.is_null());
+
+        // Convert the raw bytes back to a string
+        let string_bytes = unsafe { slice::from_raw_parts(ptr as *const u8, size as usize) };
+        let result_string = std::str::from_utf8(string_bytes).unwrap();
+
+        assert_eq!(result_string, value);
+    }
+
+    #[test]
+    fn test_variable_none() {
+        let name = "name";
+
+        // Calculate size for None type scalar
+        let size_scalar = unsafe {
+            om_variable_write_scalar_size(name.len() as u16, 0, OmDataType::None.to_c(), 0)
+        };
+
+        assert_eq!(size_scalar, 12); // 8 (header) + 4 (name length) + 0 (no value)
+
+        // Create buffer for the variable
+        let mut data = vec![255u8; size_scalar];
+
+        // Write the non-existing value -> This is essentially creating a Group
+        unsafe {
+            om_variable_write_scalar(
+                data.as_mut_ptr() as *mut std::os::raw::c_void,
+                name.len() as u16,
+                0,
+                ptr::null(),
+                ptr::null(),
+                name.as_ptr() as *const ::std::os::raw::c_char,
+                OmDataType::None.to_c(),
+                ptr::null(),
+                0,
+            );
+        }
+
+        // Verify the written data
+        assert_eq!(data, [0, 4, 4, 0, 0, 0, 0, 0, 110, 97, 109, 101]);
+
+        // Initialize a variable from the data
+        let om_variable = unsafe { om_variable_init(data.as_ptr() as *const c_void) };
+
+        // Verify the variable type and children count
+        unsafe {
+            assert_eq!(om_variable_get_type(om_variable), OmDataType::None.to_c());
+            assert_eq!(om_variable_get_children_count(om_variable), 0);
+        }
+
+        // Try to get scalar value from None type (should fail)
+        let mut ptr: *mut std::os::raw::c_void = ptr::null_mut();
+        let mut size: u64 = 0;
+
+        let error = unsafe { om_variable_get_scalar(om_variable, &mut ptr, &mut size) };
+
+        // Verify that retrieval fails with the expected error
+        assert_eq!(error, OmError_t::ERROR_INVALID_DATA_TYPE);
+    }
+
+    #[test]
+    fn test_none_variable_as_group() -> Result<(), Box<dyn std::error::Error>> {
+        let mut in_memory_backend = InMemoryBackend::new(vec![]);
+        let mut file_writer = OmFileWriter::new(in_memory_backend.borrow_mut(), 8);
+
+        // Write a regular variable
+        let int_var = file_writer.write_scalar(42i32, "attribute", &[])?;
+        // Write a None type to indicate some type of group
+        let group_var = file_writer.write_none("group", &[int_var])?;
+
+        file_writer.write_trailer(group_var)?;
+        drop(file_writer);
+
+        // Read the file
+        let read = OmFileReader::new(Arc::new(in_memory_backend))?;
+
+        // Verify the group variable
+        assert_eq!(read.name(), "group");
+        assert_eq!(read.data_type(), OmDataType::None);
+
+        // Get the child variable, which is an attribute
+        let child = read.get_child_by_index(0).unwrap();
+        assert_eq!(child.name(), "attribute");
+        assert_eq!(child.data_type(), OmDataType::Int32);
+        assert_eq!(child.expect_scalar()?.read_scalar::<i32>().unwrap(), 42);
+
+        Ok(())
+    }
 }

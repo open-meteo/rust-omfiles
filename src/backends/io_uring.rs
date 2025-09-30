@@ -1,12 +1,12 @@
-use crate::backend::backends::OmFileReaderBackendAsync;
-use crate::errors::OmFilesRsError;
+use crate::errors::OmFilesError;
+use crate::traits::OmFileReaderBackendAsync;
 use flume::{Receiver, Sender};
-use io_uring::{opcode, types, IoUring};
+use io_uring::{IoUring, opcode, types};
 use oneshot;
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 pub struct IoUringBackend {
@@ -19,7 +19,7 @@ pub struct IoUringBackend {
 struct IoRequest {
     offset: u64,
     size: u64,
-    response: oneshot::Sender<Result<Vec<u8>, OmFilesRsError>>,
+    response: oneshot::Sender<Result<Vec<u8>, OmFilesError>>,
 }
 
 impl Drop for IoUringBackend {
@@ -30,13 +30,13 @@ impl Drop for IoUringBackend {
 }
 
 impl IoUringBackend {
-    pub fn new(file: File, queue_depth: Option<u32>) -> Result<Self, OmFilesRsError> {
+    pub fn new(file: File, queue_depth: Option<u32>) -> Result<Self, OmFilesError> {
         let queue_depth = queue_depth.unwrap_or(32);
 
         // Get file size
         let size = file
             .metadata()
-            .map_err(|e| OmFilesRsError::FileWriterError {
+            .map_err(|e| OmFilesError::FileWriterError {
                 errno: e.raw_os_error().unwrap_or(0),
                 error: format!("Failed to get file metadata: {}", e),
             })?
@@ -51,7 +51,7 @@ impl IoUringBackend {
         // Create a clone of the file for the io thread
         let io_file = file
             .try_clone()
-            .map_err(|e| OmFilesRsError::FileWriterError {
+            .map_err(|e| OmFilesError::FileWriterError {
                 errno: e.raw_os_error().unwrap_or(0),
                 error: format!("Failed to clone file: {}", e),
             })?;
@@ -72,8 +72,8 @@ impl IoUringBackend {
         })
     }
 
-    pub fn from_path(path: &str, queue_depth: Option<u32>) -> Result<Self, OmFilesRsError> {
-        let file = File::open(path).map_err(|e| OmFilesRsError::CannotOpenFile {
+    pub fn from_path(path: &str, queue_depth: Option<u32>) -> Result<Self, OmFilesError> {
+        let file = File::open(path).map_err(|e| OmFilesError::CannotOpenFile {
             filename: path.to_string(),
             errno: e.raw_os_error().unwrap_or(0),
             error: e.to_string(),
@@ -88,7 +88,7 @@ impl OmFileReaderBackendAsync for IoUringBackend {
         self.size
     }
 
-    async fn get_bytes_async(&self, offset: u64, count: u64) -> Result<Vec<u8>, OmFilesRsError> {
+    async fn get_bytes_async(&self, offset: u64, count: u64) -> Result<Vec<u8>, OmFilesError> {
         // Create a oneshot channel for the response
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -102,7 +102,7 @@ impl OmFileReaderBackendAsync for IoUringBackend {
         // Send the request to the io thread
         self.operation_tx
             .send(request)
-            .map_err(|_| OmFilesRsError::FileWriterError {
+            .map_err(|_| OmFilesError::FileWriterError {
                 errno: 0,
                 error: "IO thread disconnected".into(),
             })?;
@@ -110,7 +110,7 @@ impl OmFileReaderBackendAsync for IoUringBackend {
         // Wait for the response
         response_rx
             .recv()
-            .map_err(|_| OmFilesRsError::FileWriterError {
+            .map_err(|_| OmFilesError::FileWriterError {
                 errno: 0,
                 error: "Response channel closed".into(),
             })?
@@ -122,9 +122,9 @@ fn io_thread_main(
     queue_depth: u32,
     operation_rx: Receiver<IoRequest>,
     shutdown: Arc<AtomicBool>,
-) -> Result<(), OmFilesRsError> {
+) -> Result<(), OmFilesError> {
     // Create the io_uring instance
-    let mut ring = IoUring::new(queue_depth).map_err(|e| OmFilesRsError::FileWriterError {
+    let mut ring = IoUring::new(queue_depth).map_err(|e| OmFilesError::FileWriterError {
         errno: e.raw_os_error().unwrap_or(0),
         error: format!("Failed to create io_uring: {}", e),
     })?;
@@ -142,7 +142,7 @@ fn io_thread_main(
     // Map to store pending operation ID -> (response_tx, buffer)
     let mut pending_ops: std::collections::HashMap<
         u64,
-        (oneshot::Sender<Result<Vec<u8>, OmFilesRsError>>, Vec<u8>),
+        (oneshot::Sender<Result<Vec<u8>, OmFilesError>>, Vec<u8>),
     > = std::collections::HashMap::with_capacity(queue_depth as usize);
     let mut next_op_id: u64 = 1; // Use unique IDs for user_data
 
@@ -204,7 +204,7 @@ fn io_thread_main(
                                 );
                                 // Retrieve the op we just failed to submit
                                 let (response, failed_buffer) = pending_ops.remove(&op_id).unwrap();
-                                let _ = response.send(Err(OmFilesRsError::FileWriterError {
+                                let _ = response.send(Err(OmFilesError::FileWriterError {
                                     errno: 0, // Consider mapping the error code if possible
                                     error: "Failed to push to submission queue".into(),
                                 }));
@@ -265,7 +265,7 @@ fn io_thread_main(
                 if bytes_read_or_err < 0 {
                     // Error occurred
                     let error = std::io::Error::from_raw_os_error(-bytes_read_or_err);
-                    let _ = response_tx.send(Err(OmFilesRsError::FileWriterError {
+                    let _ = response_tx.send(Err(OmFilesError::FileWriterError {
                         errno: error.raw_os_error().unwrap_or(0),
                         error: format!("io_uring read error: {}", error),
                     }));
@@ -334,7 +334,7 @@ fn io_thread_main(
         pending_ops.len()
     );
     for (_op_id, (response_tx, mut buffer)) in pending_ops.drain() {
-        let _ = response_tx.send(Err(OmFilesRsError::FileWriterError {
+        let _ = response_tx.send(Err(OmFilesError::FileWriterError {
             errno: 0,
             error: "IO operation cancelled due to shutdown".into(),
         }));

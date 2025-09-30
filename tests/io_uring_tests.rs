@@ -1,9 +1,9 @@
 #[cfg(target_os = "linux")]
 mod tests {
     use macro_rules_attribute::apply;
-    use omfiles::io::reader_async::OmFileReaderAsync;
+    use omfiles::{reader_async::OmFileReaderAsync, traits::OmArrayVariable};
     use smol_macros::test;
-    use std::path::Path;
+    use std::{path::Path, sync::Arc};
 
     #[apply(test!)]
     async fn test_io_uring_reader() {
@@ -19,10 +19,14 @@ mod tests {
             return;
         }
 
+        let backend = omfiles::IoUringBackend::from_path(test_file_path, Some(16)).unwrap();
+
         // Create an io_uring reader
-        let reader = OmFileReaderAsync::from_file(test_file_path, Some(16), None)
+        let reader = OmFileReaderAsync::new(Arc::new(backend))
             .await
             .expect("Failed to create reader");
+
+        let reader = reader.expect_array().unwrap();
 
         // Get dimensions info
         let dimensions = reader.get_dimensions();
@@ -35,7 +39,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         let data = reader
-            .read::<f32>(&read_range, None, None)
+            .read::<f32>(&read_range)
             .await
             .expect("Failed to read data");
 
