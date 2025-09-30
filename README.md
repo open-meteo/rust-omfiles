@@ -21,18 +21,30 @@ RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --all-features
 Assuming the file `data.om` directly contains a floating point array with 3 dimensions
 
 ```rust
-use omfiles::io::reader::OmFileReader;
+use omfiles::reader::OmFileReader;
 
 let file = "data.om";
-let reader = OmFileReader::from_file(file).expect(format!("Failed to open file: {}", file).as_str());
-// read root variable into a (dynamical) 3D array
-let data = reader.read::<f32>(&[50u64..51, 20..21, 10..200], None, None).expect("Failed to read data");
+let reader = OmFileReader::from_file(file).expect(&format!("Failed to open file: {}", file));
+// print name, data type and number of children
+println!("Name: {}", reader.name());
+println!("Number of children: {}", reader.number_of_children());
+println!("Data type: {:?}", reader.data_type());
 
-// Metadata information
-let dimensions = reader.get_dimensions();
-let chunk_size = reader.get_chunk_dimensions();
-println!("Dimensions: {:?}", dimensions);
-println!("Chunk size: {:?}", chunk_size);
+// if this variable is an array, we can cast it as such
+let array_reader = reader.expect_array().expect("Failed to cast to array");
+
+// Print some metadata information about the array
+println!("Dimensions: {:?}", array_reader.get_dimensions());
+println!("Chunk size: {:?}", array_reader.get_chunk_dimensions());
+println!("Compression type: {:?}", array_reader.compression());
+println!("Scale factor: {}", array_reader.scale_factor());
+println!("Add offset: {}", array_reader.add_offset());
+
+// read root variable into a (dynamical) 3D array
+let data = array_reader
+    .read::<f32>(&[50u64..51, 20..21, 10..100])
+    .expect("Failed to read data");
+println!("Data: {:?}", data);
 ```
 
 ## Features
