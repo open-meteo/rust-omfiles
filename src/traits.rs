@@ -150,6 +150,43 @@ pub trait OmFileReaderBackend: Send + Sync {
         }
         Ok(())
     }
+
+    /// Do an madvice to load data chunks from disk into page cache in the background
+    fn decode_prefetch<Backend: OmFileReaderBackendAsync>(
+        &self,
+        decoder: &OmDecoder_t,
+    ) -> Result<(), OmFilesError> {
+        let mut index_read = new_index_read(decoder);
+
+        unsafe {
+            // Loop over index blocks and read index data
+            while om_decoder_next_index_read(decoder, &mut index_read) {
+                let index_data = self.get_bytes(index_read.offset, index_read.count)?;
+
+                let mut data_read = new_data_read(&index_read);
+                let mut error = OmError_t::ERROR_OK;
+
+                // Loop over data blocks and read compressed data chunks
+                while om_decoder_next_data_read(
+                    decoder,
+                    &mut data_read,
+                    index_data.as_ptr() as *const c_void,
+                    index_read.count,
+                    &mut error,
+                ) {
+                    // Prefetch the data chunk
+                    self.prefetch_data(data_read.offset as usize, data_read.count as usize);
+                }
+
+                if error != OmError_t::ERROR_OK {
+                    let error_string = c_error_string(error);
+                    return Err(OmFilesError::DecoderError(error_string));
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// A trait for reading byte data asynchronously from different storage backends.
