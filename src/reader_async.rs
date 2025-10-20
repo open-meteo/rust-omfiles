@@ -252,8 +252,11 @@ impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncA
         into_cube_offset: &[u64],
         into_cube_dimension: &[u64],
     ) -> Result<(), OmFilesError> {
-        let decoder =
-            self.prepare_read_parameters::<T>(dim_read, into_cube_offset, into_cube_dimension)?;
+        let decoder = self.prepare_read_parameters::<T>(
+            dim_read,
+            Some(into_cube_offset),
+            Some(into_cube_dimension),
+        )?;
 
         // Process all index blocks
         let mut index_read = decoder.new_index_read();

@@ -31,8 +31,8 @@ impl WrappedDecoder {
         dims: u64,
         read_offset: Vec<u64>,
         read_count: Vec<u64>,
-        cube_offset: &[u64],
-        cube_dim: &[u64],
+        cube_offset: Option<&[u64]>,
+        cube_dim: Option<&[u64]>,
         io_size_merge: u64,
         io_size_max: u64,
     ) -> Result<Self, OmFilesError> {
@@ -44,8 +44,8 @@ impl WrappedDecoder {
                 dims,
                 read_offset.as_ptr(),
                 read_count.as_ptr(),
-                cube_offset.as_ptr(),
-                cube_dim.as_ptr(),
+                cube_offset.map_or(std::ptr::null(), |slice| slice.as_ptr()),
+                cube_dim.map_or(std::ptr::null(), |slice| slice.as_ptr()),
                 io_size_merge,
                 io_size_max,
             )
