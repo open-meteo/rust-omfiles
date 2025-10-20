@@ -354,4 +354,16 @@ impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncA
 
         Ok(())
     }
+
+    pub async fn will_need<T: OmFileArrayDataType + Clone + Zero>(
+        &self,
+        dim_read: &[Range<u64>],
+    ) -> Result<(), OmFilesError> {
+        let decoder = self.prepare_read_parameters::<T>(dim_read, None, None)?;
+        decoder
+            .decode_prefetch(self.backend, get_executor())
+            .await?;
+
+        Ok(())
+    }
 }

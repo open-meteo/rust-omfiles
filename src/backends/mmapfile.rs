@@ -164,4 +164,9 @@ impl OmFileReaderBackendAsync for MmapFile {
         let data = self.get_bytes(offset, count);
         Ok(data?.to_vec())
     }
+
+    async fn prefetch_async(&self, _offset: u64, _count: u64) -> Result<(), OmFilesError> {
+        // No-op
+        Ok(())
+    }
 }

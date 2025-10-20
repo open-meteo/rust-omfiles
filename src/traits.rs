@@ -196,6 +196,12 @@ pub trait OmFileReaderBackendAsync: Send + Sync {
         _offset: u64,
         _count: u64,
     ) -> impl Future<Output = Result<Vec<u8>, OmFilesError>> + Send;
+
+    fn prefetch_async(
+        &self,
+        _offset: u64,
+        _count: u64,
+    ) -> impl Future<Output = Result<(), OmFilesError>> + Send;
 }
 
 pub(crate) trait OmFileVariableImpl {

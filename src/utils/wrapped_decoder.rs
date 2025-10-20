@@ -1,12 +1,15 @@
 use crate::core::c_defaults::new_index_read;
 use crate::core::c_defaults::{c_error_string, create_uninit_decoder, new_data_read};
+use crate::traits::OmFileReaderBackendAsync;
 use crate::{errors::OmFilesError, variable::OmVariablePtr};
+use async_executor::Executor;
 use om_file_format_sys::{
     OmDecoder_indexRead_t, OmDecoder_t, OmError_t, OmRange_t, om_decoder_decode_chunks,
     om_decoder_init, om_decoder_next_data_read, om_decoder_next_index_read,
     om_decoder_read_buffer_size,
 };
 use std::ffi::c_void;
+use std::sync::Arc;
 
 /// This is wrapping the OmDecoder_t struct to guarantee Send and Sync on it.
 /// This is safe to do, because the underlying C-library does not modify the
@@ -66,6 +69,52 @@ impl WrappedDecoder {
     /// Get the required buffer size for decoding
     pub fn buffer_size(&self) -> usize {
         unsafe { om_decoder_read_buffer_size(&self.decoder) as usize }
+    }
+
+    pub async fn decode_prefetch<Backend: OmFileReaderBackendAsync + 'static>(
+        &self,
+        backend: &Arc<Backend>,
+        executor: &Executor<'_>,
+    ) -> Result<(), OmFilesError> {
+        let mut index_read = new_index_read(&self.decoder);
+
+        unsafe {
+            // Loop over index blocks and read index data
+            while om_decoder_next_index_read(&self.decoder, &mut index_read) {
+                let index_data = backend
+                    .get_bytes_async(index_read.offset, index_read.count)
+                    .await?;
+
+                let mut data_read = new_data_read(&index_read);
+                let mut error = OmError_t::ERROR_OK;
+
+                // Loop over data blocks and read compressed data chunks
+                while om_decoder_next_data_read(
+                    &self.decoder,
+                    &mut data_read,
+                    index_data.as_ptr() as *const c_void,
+                    index_read.count,
+                    &mut error,
+                ) {
+                    // Clone backend for the task
+                    let backend_clone = backend.clone(); // Assuming backend implements Clone
+                    let offset = data_read.offset;
+                    let count = data_read.count;
+
+                    // Spawn prefetch task without awaiting
+                    executor
+                        .spawn(async move { backend_clone.prefetch_async(offset, count).await })
+                        .detach();
+                }
+
+                if error != OmError_t::ERROR_OK {
+                    let error_string = c_error_string(error);
+                    return Err(OmFilesError::DecoderError(error_string));
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Decode a chunk safely
