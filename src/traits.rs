@@ -150,6 +150,40 @@ pub trait OmFileReaderBackend: Send + Sync {
         }
         Ok(())
     }
+
+    /// Do an madvice to load data chunks from disk into page cache in the background
+    fn decode_prefetch(&self, decoder: &OmDecoder_t) -> Result<(), OmFilesError> {
+        let mut index_read = new_index_read(decoder);
+
+        unsafe {
+            // Loop over index blocks and read index data
+            while om_decoder_next_index_read(decoder, &mut index_read) {
+                let index_data = self.get_bytes(index_read.offset, index_read.count)?;
+
+                let mut data_read = new_data_read(&index_read);
+                let mut error = OmError_t::ERROR_OK;
+
+                // Loop over data blocks and read compressed data chunks
+                while om_decoder_next_data_read(
+                    decoder,
+                    &mut data_read,
+                    index_data.as_ptr() as *const c_void,
+                    index_read.count,
+                    &mut error,
+                ) {
+                    // Prefetch the data chunk
+                    self.prefetch_data(data_read.offset as usize, data_read.count as usize);
+                }
+
+                if error != OmError_t::ERROR_OK {
+                    let error_string = c_error_string(error);
+                    return Err(OmFilesError::DecoderError(error_string));
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// A trait for reading byte data asynchronously from different storage backends.
@@ -162,6 +196,12 @@ pub trait OmFileReaderBackendAsync: Send + Sync {
         _offset: u64,
         _count: u64,
     ) -> impl Future<Output = Result<Vec<u8>, OmFilesError>> + Send;
+
+    fn prefetch_async(
+        &self,
+        _offset: u64,
+        _count: u64,
+    ) -> impl Future<Output = Result<(), OmFilesError>> + Send;
 }
 
 pub(crate) trait OmFileVariableImpl {
@@ -283,8 +323,8 @@ pub trait OmArrayVariable {
     fn prepare_read_parameters<T: OmFileArrayDataType>(
         &self,
         dim_read: &[Range<u64>],
-        into_cube_offset: &[u64],
-        into_cube_dimension: &[u64],
+        into_cube_offset: Option<&[u64]>,
+        into_cube_dimension: Option<&[u64]>,
     ) -> Result<crate::utils::wrapped_decoder::WrappedDecoder, OmFilesError>;
 }
 
@@ -334,8 +374,8 @@ impl<T: OmArrayVariableImpl> OmArrayVariable for T {
     fn prepare_read_parameters<U: OmFileArrayDataType>(
         &self,
         dim_read: &[Range<u64>],
-        into_cube_offset: &[u64],
-        into_cube_dimension: &[u64],
+        into_cube_offset: Option<&[u64]>,
+        into_cube_dimension: Option<&[u64]>,
     ) -> Result<crate::utils::wrapped_decoder::WrappedDecoder, OmFilesError> {
         if U::DATA_TYPE_ARRAY != self.data_type() {
             return Err(OmFilesError::InvalidDataType);
@@ -344,11 +384,19 @@ impl<T: OmArrayVariableImpl> OmArrayVariable for T {
         let n_dims = self.get_dimensions().len();
 
         // Validate dimension counts
-        if n_dims != n_dimensions_read
-            || n_dimensions_read != into_cube_offset.len()
-            || n_dimensions_read != into_cube_dimension.len()
-        {
+        if n_dims != n_dimensions_read {
             return Err(OmFilesError::MismatchingCubeDimensionLength);
+        }
+
+        if let Some(into_cube_offset) = into_cube_offset {
+            if into_cube_offset.len() != n_dimensions_read {
+                return Err(OmFilesError::MismatchingCubeDimensionLength);
+            }
+        }
+        if let Some(into_cube_dimension) = into_cube_dimension {
+            if into_cube_dimension.len() != n_dimensions_read {
+                return Err(OmFilesError::MismatchingCubeDimensionLength);
+            }
         }
 
         // Prepare read parameters
