@@ -225,6 +225,16 @@ impl<'a, Backend: OmFileReaderBackend> OmFileArray<'a, Backend> {
 
         Ok(out)
     }
+
+    pub fn will_need<T: OmFileArrayDataType + Clone + Zero>(
+        &self,
+        dim_read: &[Range<u64>],
+    ) -> Result<(), OmFilesError> {
+        let decoder = self.prepare_read_parameters::<T>(dim_read, &[], &[])?;
+        self.backend().decode_prefetch(&decoder.decoder)?;
+
+        Ok(())
+    }
 }
 
 impl OmFileReader<MmapFile> {

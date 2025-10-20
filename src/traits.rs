@@ -152,10 +152,7 @@ pub trait OmFileReaderBackend: Send + Sync {
     }
 
     /// Do an madvice to load data chunks from disk into page cache in the background
-    fn decode_prefetch<Backend: OmFileReaderBackendAsync>(
-        &self,
-        decoder: &OmDecoder_t,
-    ) -> Result<(), OmFilesError> {
+    fn decode_prefetch(&self, decoder: &OmDecoder_t) -> Result<(), OmFilesError> {
         let mut index_read = new_index_read(decoder);
 
         unsafe {
