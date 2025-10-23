@@ -34,3 +34,4 @@ pub use core::data_types::OmDataType;
 pub use variable::OmOffsetSize;
 
 pub use errors::OmFilesError;
+pub use om_file_format_sys as _om_file_format_sys;

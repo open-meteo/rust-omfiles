@@ -279,6 +279,9 @@ fn test_write_chunks() -> Result<(), Box<dyn std::error::Error>> {
         let read = OmFileReader::new(backend.clone())?;
         let read = read.expect_array()?;
 
+        let lut = read.get_complete_lut()?;
+        assert_eq!(lut, [3, 7, 11, 14, 18, 22, 25, 28, 31, 32]);
+
         let a = read.read::<f32>(&[0..5, 0..5])?;
         let expected = ArrayD::from_shape_vec(
             vec![5, 5],
