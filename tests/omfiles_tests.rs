@@ -488,6 +488,7 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
         let backend = Arc::new(MmapFile::new(file_for_reading, FileAccessMode::ReadOnly)?);
         let read = OmFileReader::new(backend.clone())?;
 
+        assert!(!read.is_legacy());
         assert_eq!(read.number_of_children(), 2);
 
         let child = read.get_child_by_index(0).unwrap();

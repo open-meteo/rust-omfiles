@@ -187,6 +187,8 @@ pub trait OmFileVariable {
     fn name(&self) -> &str;
     /// Returns the number of direct child variables.
     fn number_of_children(&self) -> u32;
+    /// Whether this file comes from the old v2 format.
+    fn is_legacy(&self) -> bool;
 }
 
 // Blanket implementation of OmFileVariable for types implementing OmFileVariableImpl
@@ -215,6 +217,14 @@ impl<T: OmFileVariableImpl> OmFileVariable for T {
 
     fn number_of_children(&self) -> u32 {
         unsafe { om_file_format_sys::om_variable_get_children_count(*self.variable().variable) }
+    }
+
+    fn is_legacy(&self) -> bool {
+        let header_ptr = self.variable()._data.as_ptr();
+        unsafe {
+            om_file_format_sys::om_header_type(header_ptr as *const std::os::raw::c_void)
+                == om_file_format_sys::OmHeaderType_t::OM_HEADER_LEGACY
+        }
     }
 }
 
