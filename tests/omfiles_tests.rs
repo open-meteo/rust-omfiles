@@ -7,7 +7,7 @@ use omfiles::{
     reader_async::OmFileReaderAsync,
     traits::{
         OmArrayVariable, OmFileAsyncReadable as _, OmFileReadable, OmFileReaderBackend,
-        OmFileVariable, OmScalarVariable,
+        OmFileVariable, OmFileVariableMetadataTree, OmScalarVariable,
     },
     writer::OmFileWriter,
 };
@@ -994,6 +994,8 @@ async fn test_opening_legacy_file() -> Result<(), Box<dyn std::error::Error>> {
     assert!(result.is_ok());
     let reader = result.unwrap();
     assert_eq!(reader.name(), "");
+    let metadata = reader._get_flat_variable_metadata();
+    assert_eq!(metadata.get(""), None);
 
     // Try to open the legacy file and check properties of the reader with async reader
     let file_for_reading = File::open(file)?;
