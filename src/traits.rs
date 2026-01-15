@@ -414,10 +414,13 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
         if !name.is_empty() {
             current_path.push(format!("/{}", name));
         } else if current_path.is_empty() {
+            current_path.push(format!("/{}", name));
             // Handle unnamed root variable (often implies explicit root "/")
             // If your file format implies root name is "parent" but stored empty,
             // this logic depends on the specific file content.
             // Based on your test expectation "/parent", the root MUST have the name "parent".
+        } else {
+            panic!("Unexpected empty name for child variable");
         }
 
         let path_str = current_path.join("");
