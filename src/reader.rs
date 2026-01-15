@@ -92,22 +92,22 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
         })
     }
 
-    pub fn expect_scalar(&self) -> Result<OmFileScalar<Backend>, OmFilesError> {
+    pub fn expect_scalar<'a>(&'a self) -> Result<OmFileScalar<'a, Backend>, OmFilesError> {
         if !self.data_type().is_scalar() {
             return Err(OmFilesError::InvalidDataType);
         }
         Ok(OmFileScalar::new(&self.backend, &self.variable))
     }
 
-    pub fn expect_array(&self) -> Result<OmFileArray<Backend>, OmFilesError> {
+    pub fn expect_array<'a>(&'a self) -> Result<OmFileArray<'a, Backend>, OmFilesError> {
         self.expect_array_with_io_sizes(65536, 512)
     }
 
-    pub fn expect_array_with_io_sizes(
-        &self,
+    pub fn expect_array_with_io_sizes<'a>(
+        &'a self,
         io_size_max: u64,
         io_size_merge: u64,
-    ) -> Result<OmFileArray<Backend>, OmFilesError> {
+    ) -> Result<OmFileArray<'a, Backend>, OmFilesError> {
         if !self.data_type().is_array() {
             return Err(OmFilesError::InvalidDataType);
         }
