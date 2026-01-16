@@ -16,6 +16,26 @@ impl OmOffsetSize {
 }
 
 /// A wrapper ensuring the C pointer remains valid by holding the owner of the data.
+///
+/// # How This Works
+///
+/// The C library function `om_variable_init()` takes a pointer to memory and
+/// returns a pointer to a C struct (`OmVariable_t`) that **reads from that memory**.
+/// Critically, the C library does NOT copy the data - it just stores pointers into it.
+///
+/// This means:
+/// 1. The original memory MUST stay alive as long as we use the C pointer
+/// 2. The original memory MUST NOT move (be reallocated)
+/// 3. We must prevent Rust from dropping the Vec while the pointer is in use
+///
+/// ## Safety Strategy
+///
+/// We solve this by storing the `Vec<u8>` as `_marker` in the same struct:
+/// - When we call `om_variable_init(data.as_ptr())`, we get a C pointer that reads from `data`
+/// - We then move `data` into `_marker`, making it part of the struct
+/// - As long as `OmVariablePtr` exists, `_marker` keeps the Vec alive
+/// - When `OmVariablePtr` is dropped, `_marker` (the Vec) is also dropped, invalidating `ptr`
+/// - Because `ptr` and `_marker` are in the same struct, they have the same lifetime
 #[derive(Clone, Debug)]
 pub(crate) struct OmVariablePtr {
     /// The raw pointer to the C struct.
