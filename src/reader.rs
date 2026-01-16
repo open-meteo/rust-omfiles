@@ -27,9 +27,9 @@ pub struct OmFileReader<Backend> {
     /// The backend that provides data via the get_bytes method
     pub backend: Arc<Backend>,
     /// Direct access to the C variable pointer + safety anchor
-    pub(crate) variable: OmVariablePtr,
-    /// Metadata location (optional, mainly for legacy or root)
-    pub offset_size: OmOffsetSize,
+    variable: OmVariablePtr,
+    /// Metadata location, can be used to re-enter the file hierarchy via the backend
+    offset_size: OmOffsetSize,
 }
 
 impl<Backend> OmFileVariableImpl for OmFileReader<Backend> {

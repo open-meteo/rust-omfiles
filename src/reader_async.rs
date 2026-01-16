@@ -32,9 +32,10 @@ fn get_executor() -> &'static Executor<'static> {
 pub struct OmFileReaderAsync<Backend> {
     /// The backend that provides asynchronous data access
     pub backend: Arc<Backend>,
-    pub offset_size: OmOffsetSize,
     /// Container for variable metadata and raw data
     variable: OmVariablePtr,
+    /// Metadata location, can be used to re-enter the file hierarchy via the backend
+    offset_size: OmOffsetSize,
 }
 
 impl<Backend: OmFileReaderBackendAsync> OmFileVariableImpl for OmFileReaderAsync<Backend> {
