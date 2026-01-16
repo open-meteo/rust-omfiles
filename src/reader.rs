@@ -42,12 +42,15 @@ impl<Backend> OmFileVariableImpl for OmFileReader<Backend> {
 }
 
 impl<Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileReader<Backend> {
-    fn new_from_offset(&self, offset: OmOffsetSize) -> Result<OmFileReader<Backend>, OmFilesError> {
-        let variable = create_variable_from_offset(&self.backend, &offset)?;
+    fn new_from_offset(
+        &self,
+        offset_size: OmOffsetSize,
+    ) -> Result<OmFileReader<Backend>, OmFilesError> {
+        let variable = create_variable_from_offset(&self.backend, &offset_size)?;
         Ok(Self {
             backend: self.backend.clone(),
             variable,
-            offset_size: offset,
+            offset_size,
         })
     }
 }
@@ -166,12 +169,15 @@ impl<'a, Backend> OmFileVariableImpl for OmFileScalar<'a, Backend> {
 impl<'a, Backend> OmScalarVariableImpl for OmFileScalar<'a, Backend> {}
 
 impl<'a, Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileScalar<'a, Backend> {
-    fn new_from_offset(&self, offset: OmOffsetSize) -> Result<OmFileReader<Backend>, OmFilesError> {
-        let variable = create_variable_from_offset(&self.backend, &offset)?;
+    fn new_from_offset(
+        &self,
+        offset_size: OmOffsetSize,
+    ) -> Result<OmFileReader<Backend>, OmFilesError> {
+        let variable = create_variable_from_offset(&self.backend, &offset_size)?;
         Ok(OmFileReader {
             backend: self.backend.clone(),
             variable,
-            offset_size: offset,
+            offset_size,
         })
     }
 }
@@ -198,12 +204,15 @@ impl<'a, Backend> OmFileVariableImpl for OmFileArray<'a, Backend> {
 }
 
 impl<'a, Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileArray<'a, Backend> {
-    fn new_from_offset(&self, offset: OmOffsetSize) -> Result<OmFileReader<Backend>, OmFilesError> {
-        let variable = create_variable_from_offset(&self.backend, &offset)?;
+    fn new_from_offset(
+        &self,
+        offset_size: OmOffsetSize,
+    ) -> Result<OmFileReader<Backend>, OmFilesError> {
+        let variable = create_variable_from_offset(&self.backend, &offset_size)?;
         Ok(OmFileReader {
             backend: self.backend.clone(),
             variable,
-            offset_size: offset,
+            offset_size,
         })
     }
 }

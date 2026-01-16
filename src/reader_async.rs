@@ -32,7 +32,7 @@ fn get_executor() -> &'static Executor<'static> {
 pub struct OmFileReaderAsync<Backend> {
     /// The backend that provides asynchronous data access
     pub backend: Arc<Backend>,
-    /// Container for variable metadata and raw data
+    /// Direct access to the C variable pointer + safety anchor
     variable: OmVariablePtr,
     /// Metadata location, can be used to re-enter the file hierarchy via the backend
     offset_size: OmOffsetSize,
@@ -53,13 +53,13 @@ impl<Backend: OmFileReaderBackendAsync> OmFileAsyncReadableImpl<Backend>
 {
     async fn new_from_offset(
         &self,
-        offset: OmOffsetSize,
+        offset_size: OmOffsetSize,
     ) -> Result<OmFileReaderAsync<Backend>, OmFilesError> {
-        let variable = create_variable_from_offset(&self.backend, &offset).await?;
+        let variable = create_variable_from_offset(&self.backend, &offset_size).await?;
         Ok(OmFileReaderAsync {
             backend: self.backend.clone(),
             variable,
-            offset_size: offset,
+            offset_size,
         })
     }
 }

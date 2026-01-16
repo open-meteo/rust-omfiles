@@ -368,7 +368,10 @@ impl<T: OmArrayVariableImpl> OmArrayVariable for T {
 pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
     OmFileVariableImpl + OmFileVariable
 {
-    fn new_from_offset(&self, offset: OmOffsetSize) -> Result<OmFileReader<Backend>, OmFilesError>;
+    fn new_from_offset(
+        &self,
+        offset_size: OmOffsetSize,
+    ) -> Result<OmFileReader<Backend>, OmFilesError>;
 
     fn get_child_by_index(&self, index: u32) -> Option<OmFileReader<Backend>> {
         let mut offset = 0u64;
@@ -514,7 +517,7 @@ pub(crate) trait OmFileAsyncReadableImpl<Backend: OmFileReaderBackendAsync>:
 {
     async fn new_from_offset(
         &self,
-        offset: OmOffsetSize,
+        offset_size: OmOffsetSize,
     ) -> Result<OmFileReaderAsync<Backend>, OmFilesError>;
 
     async fn get_child_by_index(&self, index: u32) -> Option<OmFileReaderAsync<Backend>> {
