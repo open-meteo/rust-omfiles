@@ -43,11 +43,10 @@ impl<Backend> OmFileVariableImpl for OmFileReader<Backend> {
 
 impl<Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileReader<Backend> {
     fn new_from_offset(&self, offset: OmOffsetSize) -> Result<OmFileReader<Backend>, OmFilesError> {
-        let var_data = self.backend.get_bytes(offset.offset, offset.size)?;
-        let var_arc: Arc<[u8]> = var_data.to_vec().into();
+        let variable = create_variable_from_offset(&self.backend, &offset)?;
         Ok(Self {
             backend: self.backend.clone(),
-            variable: OmVariablePtr::new(var_arc),
+            variable,
             offset_size: offset,
         })
     }
@@ -64,12 +63,11 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
                 backend.get_bytes((file_size - trailer_size) as u64, trailer_size as u64)?;
             match unsafe { process_trailer(&trailer_data) } {
                 Ok(offset_size) => {
-                    let var_data = backend.get_bytes(offset_size.offset, offset_size.size)?;
-                    let var_arc: Arc<[u8]> = var_data.to_vec().into();
+                    let variable = create_variable_from_offset(&backend, &offset_size)?;
 
                     return Ok(Self {
                         backend: backend.clone(),
-                        variable: OmVariablePtr::new(var_arc),
+                        variable,
                         offset_size,
                     });
                 }
@@ -169,11 +167,10 @@ impl<'a, Backend> OmScalarVariableImpl for OmFileScalar<'a, Backend> {}
 
 impl<'a, Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileScalar<'a, Backend> {
     fn new_from_offset(&self, offset: OmOffsetSize) -> Result<OmFileReader<Backend>, OmFilesError> {
-        let var_data = self.backend.get_bytes(offset.offset, offset.size)?;
-        let var_arc: Arc<[u8]> = var_data.to_vec().into();
+        let variable = create_variable_from_offset(&self.backend, &offset)?;
         Ok(OmFileReader {
             backend: self.backend.clone(),
-            variable: OmVariablePtr::new(var_arc),
+            variable,
             offset_size: offset,
         })
     }
@@ -202,11 +199,10 @@ impl<'a, Backend> OmFileVariableImpl for OmFileArray<'a, Backend> {
 
 impl<'a, Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileArray<'a, Backend> {
     fn new_from_offset(&self, offset: OmOffsetSize) -> Result<OmFileReader<Backend>, OmFilesError> {
-        let var_data = self.backend.get_bytes(offset.offset, offset.size)?;
-        let var_arc: Arc<[u8]> = var_data.to_vec().into();
+        let variable = create_variable_from_offset(&self.backend, &offset)?;
         Ok(OmFileReader {
             backend: self.backend.clone(),
-            variable: OmVariablePtr::new(var_arc),
+            variable,
             offset_size: offset,
         })
     }
@@ -279,4 +275,14 @@ impl OmFileReader<MmapFile> {
     pub fn was_deleted(&self) -> bool {
         self.backend.was_deleted()
     }
+}
+
+/// Utility function to create an `OmVariablePtr` from offset and size in the file.
+fn create_variable_from_offset<Backend: OmFileReaderBackend>(
+    backend: &Arc<Backend>,
+    offset_size: &OmOffsetSize,
+) -> Result<OmVariablePtr, OmFilesError> {
+    let var_data = backend.get_bytes(offset_size.offset, offset_size.size)?;
+    let var_arc: Arc<[u8]> = var_data.to_vec().into();
+    Ok(OmVariablePtr::new(var_arc))
 }

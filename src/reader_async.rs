@@ -54,14 +54,10 @@ impl<Backend: OmFileReaderBackendAsync> OmFileAsyncReadableImpl<Backend>
         &self,
         offset: OmOffsetSize,
     ) -> Result<OmFileReaderAsync<Backend>, OmFilesError> {
-        let var_data = self
-            .backend
-            .get_bytes_async(offset.offset, offset.size)
-            .await?;
-        let var_arc: Arc<[u8]> = var_data.to_vec().into();
+        let variable = create_variable_from_offset(&self.backend, &offset).await?;
         Ok(OmFileReaderAsync {
             backend: self.backend.clone(),
-            variable: OmVariablePtr::new(var_arc),
+            variable,
             offset_size: offset,
         })
     }
@@ -92,13 +88,10 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
                 .await?;
             match unsafe { process_trailer(&trailer_data) } {
                 Ok(offset_size) => {
-                    let var_data = backend
-                        .get_bytes_async(offset_size.offset, offset_size.size)
-                        .await?;
-                    let var_arc: Arc<[u8]> = var_data.to_vec().into();
+                    let variable = create_variable_from_offset(&backend, &offset_size).await?;
                     return Ok(Self {
                         backend,
-                        variable: OmVariablePtr::new(var_arc),
+                        variable,
                         offset_size,
                     });
                 }
@@ -196,14 +189,10 @@ impl<'a, Backend: OmFileReaderBackendAsync> OmFileAsyncReadableImpl<Backend>
         &self,
         offset: OmOffsetSize,
     ) -> Result<OmFileReaderAsync<Backend>, OmFilesError> {
-        let var_data = self
-            .backend
-            .get_bytes_async(offset.offset, offset.size)
-            .await?;
-        let var_arc: Arc<[u8]> = var_data.to_vec().into();
+        let variable = create_variable_from_offset(&self.backend, &offset).await?;
         Ok(OmFileReaderAsync {
             backend: self.backend.clone(),
-            variable: OmVariablePtr::new(var_arc),
+            variable,
             offset_size: offset,
         })
     }
@@ -383,4 +372,16 @@ impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncA
 
         Ok(())
     }
+}
+
+/// Utility function to create an `OmVariablePtr` from offset and size in the file.
+async fn create_variable_from_offset<Backend: OmFileReaderBackendAsync>(
+    backend: &Arc<Backend>,
+    offset_size: &OmOffsetSize,
+) -> Result<OmVariablePtr, OmFilesError> {
+    let var_data = backend
+        .get_bytes_async(offset_size.offset, offset_size.size)
+        .await?;
+    let var_arc: Arc<[u8]> = var_data.to_vec().into();
+    Ok(OmVariablePtr::new(var_arc))
 }
