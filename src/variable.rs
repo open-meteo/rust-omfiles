@@ -17,7 +17,7 @@ impl OmOffsetSize {
 
 /// A wrapper ensuring the C pointer remains valid by holding the owner of the data.
 ///
-/// # How This Works
+/// # Safety
 ///
 /// The C library function `om_variable_init()` takes a pointer to memory and
 /// returns a pointer to a C struct (`OmVariable_t`) that **reads from that memory**.
