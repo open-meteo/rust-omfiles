@@ -380,7 +380,7 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
         }
 
         let offset_size = OmOffsetSize::new(offset, size);
-        self.init_child_from_offset_size(offset_size).ok()
+        self.new_from_offset(offset_size).ok()
     }
 
     fn get_child_by_name(&self, name: &str) -> Option<OmFileReader<Backend>> {
@@ -393,13 +393,6 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
             }
         }
         None
-    }
-
-    fn init_child_from_offset_size(
-        &self,
-        offset_size: OmOffsetSize,
-    ) -> Result<OmFileReader<Backend>, OmFilesError> {
-        self.new_from_offset(offset_size)
     }
 
     #[cfg(feature = "metadata-tree")]
@@ -512,7 +505,7 @@ where
         &self,
         offset_size: OmOffsetSize,
     ) -> Result<OmFileReader<Backend>, OmFilesError> {
-        OmFileReadableImpl::init_child_from_offset_size(self, offset_size)
+        OmFileReadableImpl::new_from_offset(self, offset_size)
     }
 }
 
@@ -534,7 +527,7 @@ pub(crate) trait OmFileAsyncReadableImpl<Backend: OmFileReaderBackendAsync>:
         }
 
         let offset_size = OmOffsetSize::new(offset, size);
-        self.init_child_from_offset_size(offset_size).await.ok()
+        self.new_from_offset(offset_size).await.ok()
     }
 
     async fn get_child_by_name(&self, name: &str) -> Option<OmFileReaderAsync<Backend>> {
@@ -547,13 +540,6 @@ pub(crate) trait OmFileAsyncReadableImpl<Backend: OmFileReaderBackendAsync>:
             }
         }
         None
-    }
-
-    async fn init_child_from_offset_size(
-        &self,
-        offset_size: OmOffsetSize,
-    ) -> Result<OmFileReaderAsync<Backend>, OmFilesError> {
-        self.new_from_offset(offset_size).await
     }
 }
 
