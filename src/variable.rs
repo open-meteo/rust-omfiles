@@ -1,7 +1,6 @@
 use om_file_format_sys::{OmVariable_t, om_variable_init};
 use std::ops::Deref;
 use std::os::raw::c_void;
-use std::sync::Arc;
 
 /// A type indicating the offset and size of a variable in an OmFile.
 #[derive(Debug, Clone, PartialEq)]
@@ -21,9 +20,8 @@ impl OmOffsetSize {
 pub(crate) struct OmVariablePtr {
     /// The raw pointer to the C struct.
     pub(crate) ptr: *const OmVariable_t,
-    /// Keeps the memory alive.
-    /// This specific Arc owns ONLY the bytes for this specific variable's header.
-    _marker: Arc<[u8]>,
+    /// Keeps the memory alive for this variable alive.
+    _marker: Vec<u8>,
 }
 
 // Safety: We assert that the C library functions are thread-safe for read-only access.
@@ -40,7 +38,7 @@ impl Deref for OmVariablePtr {
 
 impl OmVariablePtr {
     /// Initialize a new variable pointer from an Arc slice.
-    pub(crate) fn new(data: Arc<[u8]>) -> Self {
+    pub(crate) fn new(data: Vec<u8>) -> Self {
         let ptr = unsafe { om_variable_init(data.as_ptr() as *const c_void) };
         Self { ptr, _marker: data }
     }

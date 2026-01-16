@@ -113,11 +113,11 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
         if header_type != OmHeaderType_t::OM_HEADER_LEGACY {
             return Err(OmFilesError::NotAnOmFile);
         }
-        let header_arc: Arc<[u8]> = header_data.to_vec().into();
+        let header_vec: Vec<u8> = header_data.to_vec();
 
         Ok(Self {
             backend,
-            variable: OmVariablePtr::new(header_arc),
+            variable: OmVariablePtr::new(header_vec),
             offset_size: OmOffsetSize {
                 offset: 0,
                 size: header_size as u64,
@@ -383,6 +383,6 @@ async fn create_variable_from_offset<Backend: OmFileReaderBackendAsync>(
     let var_data = backend
         .get_bytes_async(offset_size.offset, offset_size.size)
         .await?;
-    let var_arc: Arc<[u8]> = var_data.to_vec().into();
-    Ok(OmVariablePtr::new(var_arc))
+    let var_vec: Vec<u8> = var_data.to_vec();
+    Ok(OmVariablePtr::new(var_vec))
 }
