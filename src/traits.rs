@@ -406,29 +406,15 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
     ) {
         let name = self.name();
 
-        // Logic to build the path correctly for Root vs Children
-        if !name.is_empty() {
-            current_path.push(format!("/{}", name));
-        } else if current_path.is_empty() {
-            current_path.push(format!("/{}", name));
-            // Handle unnamed root variable (often implies explicit root "/")
-            // If your file format implies root name is "parent" but stored empty,
-            // this logic depends on the specific file content.
-            // Based on your test expectation "/parent", the root MUST have the name "parent".
-        } else {
-            panic!("Unexpected empty name for child variable");
-        }
-
+        // TODO: This requires for paths to be unique
+        current_path.push(format!("/{}", name));
+        // Create hierarchical key
         let path_str = current_path.join("");
-        if !path_str.is_empty() {
-            result.insert(path_str, self.offset_size().clone());
-        }
+        result.insert(path_str, self.offset_size().clone());
 
         let num_children = self.number_of_children();
         for i in 0..num_children {
             if let Some(child) = self.get_child_by_index(i) {
-                // Recursive call. The child (OmFileReader) will have its offset_size set
-                // because we will update init_child_from_offset_size to set it.
                 child.collect_variable_metadata(current_path.clone(), result);
             }
         }
