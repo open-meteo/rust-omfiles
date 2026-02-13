@@ -25,13 +25,13 @@ memmap2 = "0.9.9"
 om-file-format-sys = { git = "https://github.com/open-meteo/om-file-format", rev = "9feec4b8f01fee2843ddb940ddc4dd92b2981437" }
 ndarray = "0.17.2"
 num-traits = "0.2.19"
-thiserror = "2.0.17"
+thiserror = "2.0.18"
 async-lock = "3.4.2"
 async-executor = "1.13.3"
 
 [dev-dependencies]
 criterion = "0.8"
-rand = "0.9"
+rand = "0.10"
 smol-macros = "0.1.1"
 macro_rules_attribute = "0.2.2"
 
