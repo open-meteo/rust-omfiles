@@ -259,6 +259,19 @@ impl<'a, Backend: OmFileReaderBackend> OmFileArray<'a, Backend> {
 
         Ok(out)
     }
+
+    /// Returns the byte range in the file that encompasses all index and data blocks
+    /// required to read the given slice of the array.
+    pub fn get_byte_range<T: OmFileArrayDataType>(
+        &self,
+        dim_read: &[Range<u64>],
+    ) -> Result<Range<u64>, OmFilesError> {
+        let out_dims: Vec<u64> = dim_read.iter().map(|r| r.end - r.start).collect();
+        let decoder =
+            self.prepare_read_parameters::<T>(dim_read, &vec![0; dim_read.len()], &out_dims)?;
+
+        self.backend.get_byte_range(&decoder.decoder)
+    }
 }
 
 impl OmFileReader<MmapFile> {
