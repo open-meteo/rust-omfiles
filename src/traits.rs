@@ -98,6 +98,57 @@ pub trait OmFileReaderBackend: Send + Sync {
     /// or an owned `Vec<u8>` for others (like file IO).
     fn get_bytes(&self, offset: u64, count: u64) -> Result<Self::Bytes<'_>, OmFilesError>;
 
+    /// Returns the byte range in the file that encompasses all index and data blocks
+    /// required to read the array described by the given decoder.
+    ///
+    /// This is useful for pre-fetching, range requests, or determining how much
+    /// of a file needs to be read. The returned range is the tightest contiguous
+    /// span from the lowest offset to the highest `offset + count` across all
+    /// index and data reads.
+    ///
+    /// Returns an empty range (`0..0`) if the decoder produces no reads.
+    fn get_byte_range(&self, decoder: &OmDecoder_t) -> Result<Range<u64>, OmFilesError> {
+        let mut min_offset: u64 = u64::MAX;
+        let mut max_end: u64 = 0;
+
+        let mut index_read = new_index_read(decoder);
+        unsafe {
+            // Loop over index blocks and include their byte ranges
+            while om_decoder_next_index_read(decoder, &mut index_read) {
+                min_offset = min_offset.min(index_read.offset);
+                max_end = max_end.max(index_read.offset + index_read.count);
+
+                let index_data = self.get_bytes(index_read.offset, index_read.count)?;
+
+                let mut data_read = new_data_read(&index_read);
+                let mut error = OmError_t::ERROR_OK;
+
+                // Loop over data blocks and include their byte ranges
+                while om_decoder_next_data_read(
+                    decoder,
+                    &mut data_read,
+                    index_data.as_ptr() as *const c_void,
+                    index_read.count,
+                    &mut error,
+                ) {
+                    min_offset = min_offset.min(data_read.offset);
+                    max_end = max_end.max(data_read.offset + data_read.count);
+                }
+
+                if error != OmError_t::ERROR_OK {
+                    let error_string = c_error_string(error);
+                    return Err(OmFilesError::DecoderError(error_string));
+                }
+            }
+        }
+
+        if min_offset == u64::MAX {
+            Ok(0..0)
+        } else {
+            Ok(min_offset..max_end)
+        }
+    }
+
     fn decode<OmType: OmFileArrayDataType>(
         &self,
         decoder: &OmDecoder_t,
