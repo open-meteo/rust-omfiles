@@ -661,7 +661,7 @@ dependencies = [
 [[package]]
 name = "om-file-format-sys"
 version = "0.0.0"
-source = "git+https://github.com/open-meteo/om-file-format?rev=9feec4b8f01fee2843ddb940ddc4dd92b2981437#9feec4b8f01fee2843ddb940ddc4dd92b2981437"
+source = "git+https://github.com/open-meteo/om-file-format?rev=7e688eca60ce9600d9111647d3e4ed9bb3c6e8f1#7e688eca60ce9600d9111647d3e4ed9bb3c6e8f1"
 dependencies = [
  "bindgen",
  "cc",
