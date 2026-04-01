@@ -1,5 +1,6 @@
 //! Sync reader related structs for OmFiles.
 
+use crate::OmOffsetSize;
 use crate::backends::mmapfile::{FileAccessMode, MmapFile};
 use crate::errors::OmFilesError;
 use crate::traits::OmFileArrayDataType;
@@ -8,7 +9,7 @@ use crate::traits::{
     OmFileVariableImpl, OmScalarVariableImpl,
 };
 use crate::utils::reader_utils::process_trailer;
-use crate::variable::OmVariableContainer;
+use crate::variable::OmVariablePtr;
 use ndarray::ArrayD;
 use num_traits::Zero;
 use om_file_format_sys::{OmHeaderType_t, om_header_size, om_header_type, om_trailer_size};
@@ -25,26 +26,32 @@ use std::sync::Arc;
 pub struct OmFileReader<Backend> {
     /// The backend that provides data via the get_bytes method
     pub backend: Arc<Backend>,
-    /// The variable containing metadata and access methods
-    variable: OmVariableContainer,
+    /// Direct access to the C variable pointer + safety anchor
+    variable: OmVariablePtr,
+    /// Metadata location, can be used to re-enter the file hierarchy via the backend
+    offset_size: OmOffsetSize,
 }
 
 impl<Backend> OmFileVariableImpl for OmFileReader<Backend> {
-    fn variable(&self) -> &OmVariableContainer {
+    fn variable(&self) -> &OmVariablePtr {
         &self.variable
+    }
+    fn offset_size(&self) -> &OmOffsetSize {
+        &self.offset_size
     }
 }
 
 impl<Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileReader<Backend> {
-    fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReader<Backend> {
-        Self {
+    fn new_from_offset(
+        &self,
+        offset_size: OmOffsetSize,
+    ) -> Result<OmFileReader<Backend>, OmFilesError> {
+        let variable = create_variable_from_offset(&self.backend, &offset_size)?;
+        Ok(Self {
             backend: self.backend.clone(),
             variable,
-        }
-    }
-
-    fn backend(&self) -> &Backend {
-        &self.backend
+            offset_size,
+        })
     }
 }
 
@@ -59,13 +66,12 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
                 backend.get_bytes((file_size - trailer_size) as u64, trailer_size as u64)?;
             match unsafe { process_trailer(&trailer_data) } {
                 Ok(offset_size) => {
-                    let variable_data = backend
-                        .get_bytes(offset_size.offset, offset_size.size)?
-                        .to_vec();
+                    let variable = create_variable_from_offset(&backend, &offset_size)?;
 
                     return Ok(Self {
                         backend: backend.clone(),
-                        variable: OmVariableContainer::new(variable_data, Some(offset_size)),
+                        variable,
+                        offset_size,
                     });
                 }
                 Err(OmFilesError::NotAnOmFile) => {
@@ -85,35 +91,45 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
         if header_type != OmHeaderType_t::OM_HEADER_LEGACY {
             return Err(OmFilesError::NotAnOmFile);
         }
+        let header_vec: Vec<u8> = header_data.to_vec();
 
         Ok(Self {
             backend: backend.clone(),
-            variable: OmVariableContainer::new(header_data.to_vec(), None),
+            variable: OmVariablePtr::new(header_vec),
+            offset_size: OmOffsetSize {
+                offset: 0,
+                size: header_size as u64,
+            },
         })
     }
 
-    pub fn expect_scalar(&self) -> Result<OmFileScalar<Backend>, OmFilesError> {
+    pub fn expect_scalar<'a>(&'a self) -> Result<OmFileScalar<'a, Backend>, OmFilesError> {
         if !self.data_type().is_scalar() {
             return Err(OmFilesError::InvalidDataType);
         }
-        Ok(OmFileScalar::new(&self.backend, &self.variable))
+        Ok(OmFileScalar::new(
+            &self.backend,
+            &self.variable,
+            &self.offset_size,
+        ))
     }
 
-    pub fn expect_array(&self) -> Result<OmFileArray<Backend>, OmFilesError> {
+    pub fn expect_array<'a>(&'a self) -> Result<OmFileArray<'a, Backend>, OmFilesError> {
         self.expect_array_with_io_sizes(65536, 512)
     }
 
-    pub fn expect_array_with_io_sizes(
-        &self,
+    pub fn expect_array_with_io_sizes<'a>(
+        &'a self,
         io_size_max: u64,
         io_size_merge: u64,
-    ) -> Result<OmFileArray<Backend>, OmFilesError> {
+    ) -> Result<OmFileArray<'a, Backend>, OmFilesError> {
         if !self.data_type().is_array() {
             return Err(OmFilesError::InvalidDataType);
         }
         Ok(OmFileArray {
             backend: &self.backend,
             variable: &self.variable,
+            offset_size: &self.offset_size,
             io_size_max,
             io_size_merge,
         })
@@ -123,33 +139,46 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
 /// Represents a scalar variable in an OmFile.
 pub struct OmFileScalar<'a, Backend> {
     backend: &'a Arc<Backend>,
-    variable: &'a OmVariableContainer,
+    variable: &'a OmVariablePtr,
+    offset_size: &'a OmOffsetSize,
 }
 
 impl<'a, Backend> OmFileScalar<'a, Backend> {
-    pub(crate) fn new(backend: &'a Arc<Backend>, variable: &'a OmVariableContainer) -> Self {
-        OmFileScalar { backend, variable }
+    pub(crate) fn new(
+        backend: &'a Arc<Backend>,
+        variable: &'a OmVariablePtr,
+        offset_size: &'a OmOffsetSize,
+    ) -> Self {
+        OmFileScalar {
+            backend,
+            variable,
+            offset_size,
+        }
     }
 }
 
 impl<'a, Backend> OmFileVariableImpl for OmFileScalar<'a, Backend> {
-    fn variable(&self) -> &OmVariableContainer {
+    fn variable(&self) -> &OmVariablePtr {
         self.variable
+    }
+    fn offset_size(&self) -> &OmOffsetSize {
+        &self.offset_size
     }
 }
 
 impl<'a, Backend> OmScalarVariableImpl for OmFileScalar<'a, Backend> {}
 
 impl<'a, Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileScalar<'a, Backend> {
-    fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReader<Backend> {
-        OmFileReader {
+    fn new_from_offset(
+        &self,
+        offset_size: OmOffsetSize,
+    ) -> Result<OmFileReader<Backend>, OmFilesError> {
+        let variable = create_variable_from_offset(&self.backend, &offset_size)?;
+        Ok(OmFileReader {
             backend: self.backend.clone(),
             variable,
-        }
-    }
-
-    fn backend(&self) -> &Backend {
-        &self.backend
+            offset_size,
+        })
     }
 }
 
@@ -158,28 +187,33 @@ pub struct OmFileArray<'a, Backend> {
     /// The backend that provides data via the get_bytes method
     backend: &'a Arc<Backend>,
     /// The variable containing metadata and access methods
-    variable: &'a OmVariableContainer,
+    variable: &'a OmVariablePtr,
+    offset_size: &'a OmOffsetSize,
 
     io_size_max: u64,
     io_size_merge: u64,
 }
 
 impl<'a, Backend> OmFileVariableImpl for OmFileArray<'a, Backend> {
-    fn variable(&self) -> &OmVariableContainer {
+    fn variable(&self) -> &OmVariablePtr {
         self.variable
+    }
+    fn offset_size(&self) -> &OmOffsetSize {
+        self.offset_size
     }
 }
 
 impl<'a, Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileArray<'a, Backend> {
-    fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReader<Backend> {
-        OmFileReader {
+    fn new_from_offset(
+        &self,
+        offset_size: OmOffsetSize,
+    ) -> Result<OmFileReader<Backend>, OmFilesError> {
+        let variable = create_variable_from_offset(&self.backend, &offset_size)?;
+        Ok(OmFileReader {
             backend: self.backend.clone(),
             variable,
-        }
-    }
-
-    fn backend(&self) -> &Backend {
-        self.backend
+            offset_size,
+        })
     }
 }
 
@@ -234,7 +268,7 @@ impl<'a, Backend: OmFileReaderBackend> OmFileArray<'a, Backend> {
         dim_read: &[Range<u64>],
     ) -> Result<(), OmFilesError> {
         let decoder = self.prepare_read_parameters::<T>(dim_read, None, None)?;
-        self.backend().decode_prefetch(&decoder.decoder)?;
+        self.backend.decode_prefetch(&decoder.decoder)?;
 
         Ok(())
     }
@@ -263,4 +297,14 @@ impl OmFileReader<MmapFile> {
     pub fn was_deleted(&self) -> bool {
         self.backend.was_deleted()
     }
+}
+
+/// Utility function to create an `OmVariablePtr` from offset and size in the file.
+fn create_variable_from_offset<Backend: OmFileReaderBackend>(
+    backend: &Arc<Backend>,
+    offset_size: &OmOffsetSize,
+) -> Result<OmVariablePtr, OmFilesError> {
+    let var_data = backend.get_bytes(offset_size.offset, offset_size.size)?;
+    let var_vec: Vec<u8> = var_data.to_vec();
+    Ok(OmVariablePtr::new(var_vec))
 }

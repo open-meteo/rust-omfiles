@@ -4,7 +4,7 @@ use crate::core::data_types::OmDataType;
 use crate::errors::OmFilesError;
 use crate::reader::OmFileReader;
 use crate::reader_async::OmFileReaderAsync;
-use crate::variable::{OmOffsetSize, OmVariableContainer};
+use crate::variable::{OmOffsetSize, OmVariablePtr};
 use ndarray::ArrayD;
 use om_file_format_sys::{
     OmDecoder_t, OmError_t, om_decoder_decode_chunks, om_decoder_next_data_read,
@@ -96,7 +96,7 @@ pub trait OmFileReaderBackend: Send + Sync {
     /// Returns a container of bytes from the backend.
     /// This might be a borrowed slice for zero-copy backends (like mmap)
     /// or an owned `Vec<u8>` for others (like file IO).
-    fn get_bytes(&self, _offset: u64, _count: u64) -> Result<Self::Bytes<'_>, OmFilesError>;
+    fn get_bytes(&self, offset: u64, count: u64) -> Result<Self::Bytes<'_>, OmFilesError>;
 
     fn decode<OmType: OmFileArrayDataType>(
         &self,
@@ -205,7 +205,8 @@ pub trait OmFileReaderBackendAsync: Send + Sync {
 }
 
 pub(crate) trait OmFileVariableImpl {
-    fn variable(&self) -> &OmVariableContainer;
+    fn variable(&self) -> &OmVariablePtr;
+    fn offset_size(&self) -> &OmOffsetSize;
 }
 
 /// Represents any variable within an OM file structure.
@@ -219,7 +220,7 @@ pub(crate) trait OmFileVariableImpl {
 /// Variables can be:
 /// - **Scalar variables**: Single values (integers, floats, strings)
 /// - **Array variables**: Multi-dimensional arrays with compression
-/// - **Group variables**: Containers holding other only children but no data
+/// - **Group variables**: Containers holding only children but no data
 pub trait OmFileVariable {
     /// Returns the data type of this variable.
     fn data_type(&self) -> OmDataType;
@@ -234,7 +235,7 @@ impl<T: OmFileVariableImpl> OmFileVariable for T {
     fn data_type(&self) -> OmDataType {
         unsafe {
             OmDataType::try_from(
-                om_file_format_sys::om_variable_get_type(*self.variable().variable) as u8,
+                om_file_format_sys::om_variable_get_type(*&self.variable().ptr) as u8,
             )
             .expect("Invalid data type")
         }
@@ -243,8 +244,7 @@ impl<T: OmFileVariableImpl> OmFileVariable for T {
     fn name(&self) -> &str {
         unsafe {
             let mut length = 0u16;
-            let name =
-                om_file_format_sys::om_variable_get_name(*self.variable().variable, &mut length);
+            let name = om_file_format_sys::om_variable_get_name(*&self.variable().ptr, &mut length);
             if name.is_null() || length == 0 {
                 return "";
             }
@@ -254,7 +254,7 @@ impl<T: OmFileVariableImpl> OmFileVariable for T {
     }
 
     fn number_of_children(&self) -> u32 {
-        unsafe { om_file_format_sys::om_variable_get_children_count(*self.variable().variable) }
+        unsafe { om_file_format_sys::om_variable_get_children_count(*&self.variable().ptr) }
     }
 }
 
@@ -269,11 +269,7 @@ pub(crate) trait OmScalarVariableImpl: OmFileVariableImpl + OmFileVariable {
         let mut size: u64 = 0;
 
         let error = unsafe {
-            om_file_format_sys::om_variable_get_scalar(
-                *self.variable().variable,
-                &mut ptr,
-                &mut size,
-            )
+            om_file_format_sys::om_variable_get_scalar(*&self.variable().ptr, &mut ptr, &mut size)
         };
 
         if error != om_file_format_sys::OmError_t::ERROR_OK || ptr.is_null() {
@@ -334,7 +330,7 @@ impl<T: OmArrayVariableImpl> OmArrayVariable for T {
     fn compression(&self) -> crate::core::compression::OmCompressionType {
         unsafe {
             crate::core::compression::OmCompressionType::try_from(
-                om_file_format_sys::om_variable_get_compression(*self.variable().variable) as u8,
+                om_file_format_sys::om_variable_get_compression(*&self.variable().ptr) as u8,
             )
             .expect("Invalid compression type")
         }
@@ -342,20 +338,19 @@ impl<T: OmArrayVariableImpl> OmArrayVariable for T {
 
     /// Returns the scale factor of the variable
     fn scale_factor(&self) -> f32 {
-        unsafe { om_file_format_sys::om_variable_get_scale_factor(*self.variable().variable) }
+        unsafe { om_file_format_sys::om_variable_get_scale_factor(*&self.variable().ptr) }
     }
 
     /// Returns the add offset of the variable
     fn add_offset(&self) -> f32 {
-        unsafe { om_file_format_sys::om_variable_get_add_offset(*self.variable().variable) }
+        unsafe { om_file_format_sys::om_variable_get_add_offset(*&self.variable().ptr) }
     }
 
     /// Returns the dimensions of the variable
     fn get_dimensions(&self) -> &[u64] {
         unsafe {
-            let count =
-                om_file_format_sys::om_variable_get_dimensions_count(*self.variable().variable);
-            let dims = om_file_format_sys::om_variable_get_dimensions(*self.variable().variable);
+            let count = om_file_format_sys::om_variable_get_dimensions_count(*&self.variable().ptr);
+            let dims = om_file_format_sys::om_variable_get_dimensions(*&self.variable().ptr);
             std::slice::from_raw_parts(dims, count as usize)
         }
     }
@@ -363,9 +358,8 @@ impl<T: OmArrayVariableImpl> OmArrayVariable for T {
     /// Returns the chunk dimensions of the variable
     fn get_chunk_dimensions(&self) -> &[u64] {
         unsafe {
-            let count =
-                om_file_format_sys::om_variable_get_dimensions_count(*self.variable().variable);
-            let chunks = om_file_format_sys::om_variable_get_chunks(*self.variable().variable);
+            let count = om_file_format_sys::om_variable_get_dimensions_count(*&self.variable().ptr);
+            let chunks = om_file_format_sys::om_variable_get_chunks(*&self.variable().ptr);
             std::slice::from_raw_parts(chunks, count as usize)
         }
     }
@@ -405,7 +399,7 @@ impl<T: OmArrayVariableImpl> OmArrayVariable for T {
 
         // Initialize decoder
         let decoder = crate::utils::wrapped_decoder::WrappedDecoder::new(
-            self.variable().variable,
+            self.variable().clone(),
             n_dimensions_read as u64,
             read_offset,
             read_count,
@@ -422,20 +416,22 @@ impl<T: OmArrayVariableImpl> OmArrayVariable for T {
 pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
     OmFileVariableImpl + OmFileVariable
 {
-    fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReader<Backend>;
-    fn backend(&self) -> &Backend;
+    fn new_from_offset(
+        &self,
+        offset_size: OmOffsetSize,
+    ) -> Result<OmFileReader<Backend>, OmFilesError>;
 
     fn get_child_by_index(&self, index: u32) -> Option<OmFileReader<Backend>> {
         let mut offset = 0u64;
         let mut size = 0u64;
         if !unsafe {
-            om_variable_get_children(*self.variable().variable, index, 1, &mut offset, &mut size)
+            om_variable_get_children(*&self.variable().ptr, index, 1, &mut offset, &mut size)
         } {
             return None;
         }
 
         let offset_size = OmOffsetSize::new(offset, size);
-        self.init_child_from_offset_size(offset_size).ok()
+        self.new_from_offset(offset_size).ok()
     }
 
     fn get_child_by_name(&self, name: &str) -> Option<OmFileReader<Backend>> {
@@ -450,42 +446,24 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
         None
     }
 
-    fn init_child_from_offset_size(
-        &self,
-        offset_size: OmOffsetSize,
-    ) -> Result<OmFileReader<Backend>, OmFilesError> {
-        let child_variable = self
-            .backend()
-            .get_bytes(offset_size.offset, offset_size.size)?
-            .to_vec();
-
-        Ok(self.new_with_variable(OmVariableContainer::new(child_variable, Some(offset_size))))
-    }
-
     #[cfg(feature = "metadata-tree")]
-    /// Helper function that recursively collects variable metadata
     fn collect_variable_metadata(
         &self,
         mut current_path: Vec<String>,
         result: &mut HashMap<String, OmOffsetSize>,
     ) {
-        // Add current variable's metadata if it has a name and offset_size
-        // TODO: This requires for names to be unique
         let name = self.name();
-        if let Some(offset_size) = &self.variable()._offset_size {
-            current_path.push(format!("/{}", name));
-            // Create hierarchical key
-            let path_str = current_path.join("");
 
-            result.insert(path_str, offset_size.clone());
-        }
+        // TODO: This requires for paths to be unique
+        current_path.push(format!("/{}", name));
+        // Create hierarchical key
+        let path_str = current_path.join("");
+        result.insert(path_str, self.offset_size().clone());
 
-        // Process children
         let num_children = self.number_of_children();
         for i in 0..num_children {
-            let child_path = current_path.clone();
             if let Some(child) = self.get_child_by_index(i) {
-                child.collect_variable_metadata(child_path, result);
+                child.collect_variable_metadata(current_path.clone(), result);
             }
         }
     }
@@ -564,27 +542,29 @@ where
         &self,
         offset_size: OmOffsetSize,
     ) -> Result<OmFileReader<Backend>, OmFilesError> {
-        OmFileReadableImpl::init_child_from_offset_size(self, offset_size)
+        OmFileReadableImpl::new_from_offset(self, offset_size)
     }
 }
 
 pub(crate) trait OmFileAsyncReadableImpl<Backend: OmFileReaderBackendAsync>:
     OmFileVariableImpl + OmFileVariable
 {
-    fn new_with_variable(&self, variable: OmVariableContainer) -> OmFileReaderAsync<Backend>;
-    fn backend(&self) -> &Backend;
+    async fn new_from_offset(
+        &self,
+        offset_size: OmOffsetSize,
+    ) -> Result<OmFileReaderAsync<Backend>, OmFilesError>;
 
     async fn get_child_by_index(&self, index: u32) -> Option<OmFileReaderAsync<Backend>> {
         let mut offset = 0u64;
         let mut size = 0u64;
         if !unsafe {
-            om_variable_get_children(*self.variable().variable, index, 1, &mut offset, &mut size)
+            om_variable_get_children(*&self.variable().ptr, index, 1, &mut offset, &mut size)
         } {
             return None;
         }
 
         let offset_size = OmOffsetSize::new(offset, size);
-        self.init_child_from_offset_size(offset_size).await.ok()
+        self.new_from_offset(offset_size).await.ok()
     }
 
     async fn get_child_by_name(&self, name: &str) -> Option<OmFileReaderAsync<Backend>> {
@@ -597,19 +577,6 @@ pub(crate) trait OmFileAsyncReadableImpl<Backend: OmFileReaderBackendAsync>:
             }
         }
         None
-    }
-
-    async fn init_child_from_offset_size(
-        &self,
-        offset_size: OmOffsetSize,
-    ) -> Result<OmFileReaderAsync<Backend>, OmFilesError> {
-        let child_variable = self
-            .backend()
-            .get_bytes_async(offset_size.offset, offset_size.size)
-            .await?
-            .to_vec();
-
-        Ok(self.new_with_variable(OmVariableContainer::new(child_variable, Some(offset_size))))
     }
 }
 

@@ -994,6 +994,12 @@ async fn test_opening_legacy_file() -> Result<(), Box<dyn std::error::Error>> {
     assert!(result.is_ok());
     let reader = result.unwrap();
     assert_eq!(reader.name(), "");
+    #[cfg(feature = "metadata-tree")]
+    {
+        use omfiles::{OmOffsetSize, traits::OmFileVariableMetadataTree};
+        let metadata = reader._get_flat_variable_metadata();
+        assert_eq!(metadata.get("/"), Some(&OmOffsetSize::new(0, 40)));
+    }
 
     // Try to open the legacy file and check properties of the reader with async reader
     let file_for_reading = File::open(file)?;
