@@ -21,19 +21,19 @@ crate-type = ["cdylib", "rlib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-memmap2 = "0.9.9"
-om-file-format-sys = { git = "https://github.com/open-meteo/om-file-format", rev = "9feec4b8f01fee2843ddb940ddc4dd92b2981437" }
-ndarray = "0.17.2"
-num-traits = "0.2.19"
-thiserror = "2.0.18"
-async-lock = "3.4.2"
-async-executor = "1.13.3"
+memmap2 = "0.9"
+om-file-format-sys = { git = "https://github.com/open-meteo/om-file-format", rev = "4a9ecdcc28e6fc762cf3542a5d7ae3832b7d1f3c" }
+ndarray = "0.17"
+num-traits = "0.2"
+thiserror = "2.0"
+async-lock = "3.4"
+async-executor = "1.13"
 
 [dev-dependencies]
 criterion = "0.8"
 rand = "0.10"
-smol-macros = "0.1.1"
-macro_rules_attribute = "0.2.2"
+smol-macros = "0.1"
+macro_rules_attribute = "0.2"
 
 [[bench]]
 name = "om_benchmark"
