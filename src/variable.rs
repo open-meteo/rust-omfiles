@@ -15,50 +15,51 @@ impl OmOffsetSize {
     }
 }
 
-/// A wrapper around the raw C pointer OmVariable_t
-/// marked as Send + Sync.
+/// A wrapper ensuring the C pointer remains valid by holding the owner of the data.
 ///
 /// # Safety
 ///
-/// This relies on the assumption that the underlying C library functions
-/// used for reading metadata via this pointer (`om_variable_get_*`) are
-/// thread-safe when called concurrently on the same immutable variable data.
-/// The pointer itself points into the `variable_data` Vec owned by the
-/// `OmFileReader`, ensuring its validity for the lifetime of the reader instance.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct OmVariablePtr(pub(crate) *const OmVariable_t);
+/// The C library function `om_variable_init()` takes a pointer to memory and
+/// returns a pointer to a C struct (`OmVariable_t`) that **reads from that memory**.
+/// Critically, the C library does NOT copy the data - it just stores pointers into it.
+///
+/// This means:
+/// 1. The original memory MUST stay alive as long as we use the C pointer
+/// 2. The original memory MUST NOT move (be reallocated)
+/// 3. We must prevent Rust from dropping the Vec while the pointer is in use
+///
+/// ## Safety Strategy
+///
+/// We solve this by storing the `Vec<u8>` as `_marker` in the same struct:
+/// - When we call `om_variable_init(data.as_ptr())`, we get a C pointer that reads from `data`
+/// - We then move `data` into `_marker`, making it part of the struct
+/// - As long as `OmVariablePtr` exists, `_marker` keeps the Vec alive
+/// - When `OmVariablePtr` is dropped, `_marker` (the Vec) is also dropped, invalidating `ptr`
+/// - Because `ptr` and `_marker` are in the same struct, they have the same lifetime
+#[derive(Clone, Debug)]
+pub(crate) struct OmVariablePtr {
+    /// The raw pointer to the C struct.
+    pub(crate) ptr: *const OmVariable_t,
+    /// Keeps the memory alive for this variable alive.
+    _marker: Vec<u8>,
+}
 
-/// SAFETY: See safety note above. We assert that read-only access via this pointer
-/// is safe to perform concurrently from multiple threads, provided the underlying
-/// `variable_data` remains valid and unchanged, which is guaranteed by `OmFileReader`'s ownership.
+// Safety: We assert that the C library functions are thread-safe for read-only access.
+// By holding `_marker`, we ensure the memory backing `ptr` is not deallocated.
 unsafe impl Send for OmVariablePtr {}
 unsafe impl Sync for OmVariablePtr {}
 
 impl Deref for OmVariablePtr {
     type Target = *const OmVariable_t;
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.ptr
     }
 }
 
-/// Core struct to handle variable data and metadata
-pub(crate) struct OmVariableContainer {
-    /// Holds the raw data backing the variable
-    pub(crate) _data: Vec<u8>,
-    /// Offset and size information for the variable
-    pub(crate) _offset_size: Option<OmOffsetSize>,
-    /// Opaque pointer to the variable defined by header/trailer
-    pub(crate) variable: OmVariablePtr,
-}
-
-impl OmVariableContainer {
-    /// Create a new variable from raw data
-    pub(crate) fn new(data: Vec<u8>, offset_size: Option<OmOffsetSize>) -> Self {
-        let variable_ptr = unsafe { om_variable_init(data.as_ptr() as *const c_void) };
-        Self {
-            _data: data,
-            _offset_size: offset_size,
-            variable: OmVariablePtr(variable_ptr),
-        }
+impl OmVariablePtr {
+    /// Initialize a new variable pointer from an Arc slice.
+    pub(crate) fn new(data: Vec<u8>) -> Self {
+        let ptr = unsafe { om_variable_init(data.as_ptr() as *const c_void) };
+        Self { ptr, _marker: data }
     }
 }

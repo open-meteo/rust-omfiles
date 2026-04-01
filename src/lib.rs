@@ -32,7 +32,6 @@ pub use backends::memory::InMemoryBackend;
 pub use backends::mmapfile::{FileAccessMode, MmapFile};
 pub use core::compression::OmCompressionType;
 pub use core::data_types::OmDataType;
-#[cfg(feature = "metadata-tree")]
 pub use variable::OmOffsetSize;
 
 pub use errors::OmFilesError;
