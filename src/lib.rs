@@ -11,6 +11,7 @@ mod variable;
 pub mod writer;
 pub(crate) mod backends {
     mod file;
+    pub mod io_uring;
     pub mod memory;
     pub mod mmapfile;
 }
@@ -26,6 +27,7 @@ pub(crate) mod utils {
 }
 mod errors;
 
+pub use backends::io_uring::IoUringBackend;
 pub use backends::memory::InMemoryBackend;
 pub use backends::mmapfile::{FileAccessMode, MmapFile};
 pub use core::compression::OmCompressionType;
