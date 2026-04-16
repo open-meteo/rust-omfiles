@@ -18,12 +18,6 @@ impl InMemoryBackend {
     pub fn new(data: Vec<u8>) -> Self {
         Self { data }
     }
-
-    // This is required in tests to corrupt the written data on purpose.
-    #[cfg(test)]
-    pub fn as_mut_slice(&mut self) -> &mut [u8] {
-        self.data.as_mut_slice()
-    }
 }
 
 impl OmFileWriterBackend for &mut InMemoryBackend {
