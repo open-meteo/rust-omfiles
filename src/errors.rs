@@ -26,6 +26,12 @@ pub enum OmFilesError {
         range: std::ops::Range<usize>,
         allowed: usize,
     },
+    #[error("Invalid backend read: offset {offset}, count {count}, size {size}")]
+    InvalidBackendRead {
+        offset: u64,
+        count: u64,
+        size: usize,
+    },
     #[error("Chunk dimension is smaller than overall dimension")]
     ChunkDimensionIsSmallerThanOverallDim,
     #[error("Dimension must be larger than 0")]

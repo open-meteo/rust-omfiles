@@ -3,6 +3,7 @@
 use crate::{
     errors::OmFilesError,
     traits::{OmFileReaderBackend, OmFileWriterBackend},
+    utils::byte_range::checked_byte_range,
 };
 
 /// In-memory backend implementation for OmFiles.
@@ -16,6 +17,12 @@ pub struct InMemoryBackend {
 impl InMemoryBackend {
     pub fn new(data: Vec<u8>) -> Self {
         Self { data }
+    }
+
+    // This is required in tests to corrupt the written data on purpose.
+    #[cfg(test)]
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        self.data.as_mut_slice()
     }
 }
 
@@ -43,7 +50,7 @@ impl OmFileReaderBackend for InMemoryBackend {
     }
 
     fn get_bytes(&self, offset: u64, count: u64) -> Result<Self::Bytes<'_>, OmFilesError> {
-        let index_range = (offset as usize)..(offset + count) as usize;
-        Ok(&self.data[index_range])
+        let range = checked_byte_range(offset, count, self.data.len())?;
+        Ok(&self.data[range])
     }
 }

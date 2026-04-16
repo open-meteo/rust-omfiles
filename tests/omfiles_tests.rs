@@ -1177,6 +1177,42 @@ fn vec_u64_to_vec_usize(input: &Vec<u64>) -> Vec<usize> {
     input.iter().map(|&x| x as usize).collect()
 }
 
+#[test]
+fn test_corrupted_dimension_count_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let mut backend = InMemoryBackend::new(vec![]);
+    let mut file_writer = OmFileWriter::new(backend.borrow_mut(), 8);
+
+    let data = ArrayD::from_shape_vec(vec![2, 2], vec![0.0f32, 1.0, 2.0, 3.0]).unwrap();
+    let mut writer = file_writer.prepare_array::<f32>(
+        vec![2, 2],
+        vec![1, 1],
+        OmCompressionType::PforDelta2dInt16,
+        1.0,
+        0.0,
+    )?;
+
+    writer.write_data(data.view(), None, None)?;
+    let variable_meta = writer.finalize();
+    let variable = file_writer.write_array(variable_meta, "data", &[])?;
+    let var_offset = variable.offset as usize;
+    file_writer.write_trailer(variable)?;
+    drop(file_writer);
+
+    let corrupted_dimension_count: u64 = 20;
+    let corrupted_bytes = corrupted_dimension_count.to_le_bytes();
+
+    let bytes = backend.get_bytes(0, backend.count() as u64)?;
+    let mut corrupted = bytes.to_vec();
+    for (i, byte) in corrupted_bytes.iter().enumerate() {
+        corrupted[var_offset + 24 + i] = *byte;
+    }
+
+    let result = OmFileReader::new(Arc::new(InMemoryBackend::new(corrupted)));
+    assert!(matches!(result, Err(OmFilesError::DecoderError(_))));
+
+    Ok(())
+}
+
 fn write_hierarchical_file<P>(file: P) -> Result<(), Box<dyn std::error::Error>>
 where
     P: AsRef<std::path::Path>,

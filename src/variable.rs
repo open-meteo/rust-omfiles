@@ -1,4 +1,5 @@
-use om_file_format_sys::{OmVariable_t, om_variable_init};
+use crate::errors::OmFilesError;
+use om_file_format_sys::{OmError_t, OmVariable_t, om_variable_init, om_variable_validate};
 use std::ops::Deref;
 use std::os::raw::c_void;
 
@@ -58,8 +59,19 @@ impl Deref for OmVariablePtr {
 
 impl OmVariablePtr {
     /// Initialize a new variable pointer from an Arc slice.
-    pub(crate) fn new(data: Vec<u8>) -> Self {
+    pub(crate) fn new(data: Vec<u8>) -> Result<Self, OmFilesError> {
         let ptr = unsafe { om_variable_init(data.as_ptr() as *const c_void) };
-        Self { ptr, _marker: data }
+        if ptr.is_null() {
+            return Err(OmFilesError::NotAnOmFile);
+        }
+
+        let error = unsafe { om_variable_validate(ptr as *const c_void, data.len() as u64) };
+        if error != OmError_t::ERROR_OK {
+            return Err(OmFilesError::DecoderError(
+                crate::core::c_defaults::c_error_string(error),
+            ));
+        }
+
+        Ok(Self { ptr, _marker: data })
     }
 }

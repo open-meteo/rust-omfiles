@@ -95,7 +95,7 @@ impl<Backend: OmFileReaderBackend> OmFileReader<Backend> {
 
         Ok(Self {
             backend: backend.clone(),
-            variable: OmVariablePtr::new(header_vec),
+            variable: OmVariablePtr::new(header_vec)?,
             offset_size: OmOffsetSize {
                 offset: 0,
                 size: header_size as u64,
@@ -293,5 +293,5 @@ fn create_variable_from_offset<Backend: OmFileReaderBackend>(
 ) -> Result<OmVariablePtr, OmFilesError> {
     let var_data = backend.get_bytes(offset_size.offset, offset_size.size)?;
     let var_vec: Vec<u8> = var_data.to_vec();
-    Ok(OmVariablePtr::new(var_vec))
+    OmVariablePtr::new(var_vec)
 }

@@ -8,6 +8,7 @@ use std::fs::File;
 use crate::{
     errors::OmFilesError,
     traits::{OmFileReaderBackend, OmFileReaderBackendAsync},
+    utils::byte_range::checked_byte_range,
 };
 
 /// File access mode
@@ -147,10 +148,11 @@ impl OmFileReaderBackend for MmapFile {
     }
 
     fn get_bytes(&self, offset: u64, count: u64) -> Result<Self::Bytes<'_>, OmFilesError> {
-        let index_range = (offset as usize)..(offset + count) as usize;
+        let range = checked_byte_range(offset, count, self.data.len())?;
+
         match self.data {
-            MmapType::ReadOnly(ref mmap) => Ok(&mmap[index_range]),
-            MmapType::ReadWrite(ref mmap_mut) => Ok(&mmap_mut[index_range]),
+            MmapType::ReadOnly(ref mmap) => Ok(&mmap[range]),
+            MmapType::ReadWrite(ref mmap_mut) => Ok(&mmap_mut[range]),
         }
     }
 }
