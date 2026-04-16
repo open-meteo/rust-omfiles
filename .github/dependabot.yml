@@ -12,7 +12,7 @@ updates:
     commit-message:
       prefix: "chore(deps): "
     groups:
-      rust-dependencies:
+      cargo-dependencies:
         patterns:
           - "*"
   - package-ecosystem: "github-actions"
