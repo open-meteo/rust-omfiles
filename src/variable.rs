@@ -1,6 +1,5 @@
 use crate::errors::OmFilesError;
 use om_file_format_sys::{OmError_t, OmVariable_t, om_variable_init, om_variable_validate};
-use std::ops::Deref;
 use std::os::raw::c_void;
 
 /// A type indicating the offset and size of a variable in an OmFile.
@@ -37,7 +36,7 @@ impl OmOffsetSize {
 /// - As long as `OmVariablePtr` exists, `_marker` keeps the Vec alive
 /// - When `OmVariablePtr` is dropped, `_marker` (the Vec) is also dropped, invalidating `ptr`
 /// - Because `ptr` and `_marker` are in the same struct, they have the same lifetime
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct OmVariablePtr {
     /// The raw pointer to the C struct.
     pub(crate) ptr: *const OmVariable_t,
@@ -49,13 +48,6 @@ pub(crate) struct OmVariablePtr {
 // By holding `_marker`, we ensure the memory backing `ptr` is not deallocated.
 unsafe impl Send for OmVariablePtr {}
 unsafe impl Sync for OmVariablePtr {}
-
-impl Deref for OmVariablePtr {
-    type Target = *const OmVariable_t;
-    fn deref(&self) -> &Self::Target {
-        &self.ptr
-    }
-}
 
 impl OmVariablePtr {
     /// Initialize a new variable pointer from an Arc slice.
@@ -73,5 +65,9 @@ impl OmVariablePtr {
         }
 
         Ok(Self { ptr, _marker: data })
+    }
+
+    pub(crate) fn as_ptr(&self) -> *const OmVariable_t {
+        self.ptr
     }
 }

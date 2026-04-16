@@ -351,7 +351,7 @@ impl<T: OmArrayVariableImpl> OmArrayVariable for T {
 
         // Initialize decoder
         let decoder = crate::utils::wrapped_decoder::WrappedDecoder::new(
-            self.variable().clone(),
+            self.variable(),
             n_dimensions_read as u64,
             read_offset,
             read_count,
