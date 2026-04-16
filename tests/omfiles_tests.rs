@@ -1208,7 +1208,12 @@ fn test_corrupted_dimension_count_is_rejected() -> Result<(), Box<dyn std::error
     }
 
     let result = OmFileReader::new(Arc::new(InMemoryBackend::new(corrupted)));
-    assert!(matches!(result, Err(OmFilesError::DecoderError(_))));
+    assert!(result.is_err());
+    let error = result.as_ref().err().unwrap();
+    assert_eq!(
+        error.to_string(),
+        "Decoder error: Corrupted data with potential out-of-bound read"
+    );
 
     Ok(())
 }

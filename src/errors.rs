@@ -44,7 +44,7 @@ pub enum OmFilesError {
     InvalidCompressionType,
     #[error("Invalid data type")]
     InvalidDataType,
-    #[error("Decoder error {0}")]
+    #[error("Decoder error: {0}")]
     DecoderError(String),
     #[error("Not an OM file")]
     NotAnOmFile,
