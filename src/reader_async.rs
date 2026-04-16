@@ -117,7 +117,7 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
 
         Ok(Self {
             backend,
-            variable: OmVariablePtr::new(header_vec),
+            variable: OmVariablePtr::new(header_vec)?,
             offset_size: OmOffsetSize {
                 offset: 0,
                 size: header_size as u64,
@@ -384,5 +384,5 @@ async fn create_variable_from_offset<Backend: OmFileReaderBackendAsync>(
         .get_bytes_async(offset_size.offset, offset_size.size)
         .await?;
     let var_vec: Vec<u8> = var_data.to_vec();
-    Ok(OmVariablePtr::new(var_vec))
+    OmVariablePtr::new(var_vec)
 }

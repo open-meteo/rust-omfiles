@@ -22,6 +22,44 @@ fn test_mismatching_cube_dimension_length() {
 }
 
 #[test]
+fn test_empty_dimensions_are_rejected() {
+    let mut backend = InMemoryBackend::new(vec![]);
+    let mut writer = OmFileWriter::new(backend.borrow_mut(), 1024);
+
+    let result = writer.prepare_array::<i32>(vec![], vec![], OmCompressionType::None, 1.0, 0.0);
+
+    assert_eq!(error_string(result), "Dimension must be larger than 0");
+}
+
+#[test]
+fn test_zero_chunk_dimension_is_rejected() {
+    let mut backend = InMemoryBackend::new(vec![]);
+    let mut writer = OmFileWriter::new(backend.borrow_mut(), 1024);
+
+    let result =
+        writer.prepare_array::<i32>(vec![10, 10], vec![5, 0], OmCompressionType::None, 1.0, 0.0);
+
+    assert_eq!(error_string(result), "Dimension must be larger than 0");
+}
+
+#[test]
+fn test_in_memory_backend_invalid_read() {
+    use omfiles::traits::OmFileReaderBackend;
+
+    let backend = InMemoryBackend::new(vec![1, 2, 3, 4]);
+    let result = backend.get_bytes(3, 2);
+
+    assert_eq!(
+        result,
+        Err(OmFilesError::InvalidBackendRead {
+            offset: 3,
+            count: 2,
+            size: 4,
+        })
+    );
+}
+
+#[test]
 fn test_chunk_has_wrong_number_of_elements() {
     let mut backend = InMemoryBackend::new(vec![]);
     let mut writer = OmFileWriter::new(backend.borrow_mut(), 1024);

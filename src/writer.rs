@@ -238,6 +238,12 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
         if dimensions.len() != chunk_dimensions.len() {
             return Err(OmFilesError::MismatchingCubeDimensionLength);
         }
+        if dimensions.is_empty()
+            || dimensions.iter().any(|&dim| dim == 0)
+            || chunk_dimensions.iter().any(|&dim| dim == 0)
+        {
+            return Err(OmFilesError::DimensionMustBeLargerThan0);
+        }
 
         let chunks = chunk_dimensions;
 

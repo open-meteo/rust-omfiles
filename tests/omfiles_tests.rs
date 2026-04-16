@@ -981,12 +981,38 @@ fn test_nan() -> Result<(), Box<dyn std::error::Error>> {
 async fn test_opening_legacy_file() -> Result<(), Box<dyn std::error::Error>> {
     let file = "legacy_om_file.om";
     {
-        let mut data = vec![0u8; 40]; // Minimal header size
-        data[0] = 79; // 'O'
-        data[1] = 77; // 'M'
-        data[2] = 2; // version 2 is legacy!
+        // Build a legacy v2 file according to the old binary format:
+        // Int16: magic "OM"
+        // Int8: version (2)
+        // Int8: compression type with filter (use 0)
+        // Float32: scalefactor (1.0)
+        // Int64: dim0 (slow)
+        // Int64: dim1 (fast)
+        // Int64: chunk dim0
+        // Int64: chunk dim1
+        // Array of 64-bit Integer: offset lookup table (one entry for a single chunk)
+        // Blob: data for each chunk
 
-        fs::write(file, data).unwrap();
+        let mut data: Vec<u8> = Vec::new();
+        // Magic: "OM"
+        data.extend_from_slice(&[b'O', b'M']);
+        // Version: 2 (legacy)
+        data.push(2u8);
+        // Compression type with filter: pfor_delta2d_int16
+        data.push(0u8);
+        // Scale factor: 1.0f32 little endian
+        data.extend_from_slice(&1.0f32.to_le_bytes());
+        // Dimensions (Int64 little endian) - make a minimal 1x1 array
+        data.extend_from_slice(&1u64.to_le_bytes()); // dim0 (slow)
+        data.extend_from_slice(&1u64.to_le_bytes()); // dim1 (fast)
+        // Chunk dimensions (Int64 little endian)
+        data.extend_from_slice(&1u64.to_le_bytes()); // chunk dim0
+        data.extend_from_slice(&1u64.to_le_bytes()); // chunk dim1
+
+        // Now the LUT and the data BLOB would follow. They are not strictly required for this test.
+
+        // Write file
+        fs::write(file, &data).unwrap();
     }
 
     // Try to open the legacy file and check properties of the reader
@@ -1006,6 +1032,15 @@ async fn test_opening_legacy_file() -> Result<(), Box<dyn std::error::Error>> {
     let read_backend = MmapFile::new(file_for_reading, FileAccessMode::ReadOnly)?;
     let async_reader = OmFileReaderAsync::new(Arc::new(read_backend)).await?;
     assert_eq!(async_reader.name(), "");
+    assert_eq!(async_reader.number_of_children(), 0);
+
+    let array = async_reader.expect_array()?;
+    assert_eq!(array.data_type(), OmDataType::FloatArray);
+    assert_eq!(array.get_dimensions(), &[1, 1]);
+    assert_eq!(array.get_chunk_dimensions(), &[1, 1]);
+    assert_eq!(array.compression(), OmCompressionType::PforDelta2dInt16);
+    assert_eq!(array.add_offset(), 0.0);
+    assert_eq!(array.scale_factor(), 1.0);
 
     // Clean up
     remove_file_if_exists(file);
@@ -1140,6 +1175,47 @@ fn nd_assert_eq_with_accuracy_and_nan(
 
 fn vec_u64_to_vec_usize(input: &Vec<u64>) -> Vec<usize> {
     input.iter().map(|&x| x as usize).collect()
+}
+
+#[test]
+fn test_corrupted_dimension_count_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    let mut backend = InMemoryBackend::new(vec![]);
+    let mut file_writer = OmFileWriter::new(backend.borrow_mut(), 8);
+
+    let data = ArrayD::from_shape_vec(vec![2, 2], vec![0.0f32, 1.0, 2.0, 3.0]).unwrap();
+    let mut writer = file_writer.prepare_array::<f32>(
+        vec![2, 2],
+        vec![1, 1],
+        OmCompressionType::PforDelta2dInt16,
+        1.0,
+        0.0,
+    )?;
+
+    writer.write_data(data.view(), None, None)?;
+    let variable_meta = writer.finalize();
+    let variable = file_writer.write_array(variable_meta, "data", &[])?;
+    let var_offset = variable.offset as usize;
+    file_writer.write_trailer(variable)?;
+    drop(file_writer);
+
+    let corrupted_dimension_count: u64 = 20;
+    let corrupted_bytes = corrupted_dimension_count.to_le_bytes();
+
+    let bytes = backend.get_bytes(0, backend.count() as u64)?;
+    let mut corrupted = bytes.to_vec();
+    for (i, byte) in corrupted_bytes.iter().enumerate() {
+        corrupted[var_offset + 24 + i] = *byte;
+    }
+
+    let result = OmFileReader::new(Arc::new(InMemoryBackend::new(corrupted)));
+    assert!(result.is_err());
+    let error = result.as_ref().err().unwrap();
+    assert_eq!(
+        error.to_string(),
+        "Decoder error: Corrupted data with potential out-of-bound read"
+    );
+
+    Ok(())
 }
 
 fn write_hierarchical_file<P>(file: P) -> Result<(), Box<dyn std::error::Error>>
