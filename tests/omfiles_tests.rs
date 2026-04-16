@@ -981,12 +981,38 @@ fn test_nan() -> Result<(), Box<dyn std::error::Error>> {
 async fn test_opening_legacy_file() -> Result<(), Box<dyn std::error::Error>> {
     let file = "legacy_om_file.om";
     {
-        let mut data = vec![0u8; 40]; // Minimal header size
-        data[0] = 79; // 'O'
-        data[1] = 77; // 'M'
-        data[2] = 2; // version 2 is legacy!
+        // Build a legacy v2 file according to the old binary format:
+        // Int16: magic "OM"
+        // Int8: version (2)
+        // Int8: compression type with filter (use 0)
+        // Float32: scalefactor (1.0)
+        // Int64: dim0 (slow)
+        // Int64: dim1 (fast)
+        // Int64: chunk dim0
+        // Int64: chunk dim1
+        // Array of 64-bit Integer: offset lookup table (one entry for a single chunk)
+        // Blob: data for each chunk
 
-        fs::write(file, data).unwrap();
+        let mut data: Vec<u8> = Vec::new();
+        // Magic: "OM"
+        data.extend_from_slice(&[b'O', b'M']);
+        // Version: 2 (legacy)
+        data.push(2u8);
+        // Compression type with filter: pfor_delta2d_int16
+        data.push(0u8);
+        // Scale factor: 1.0f32 little endian
+        data.extend_from_slice(&1.0f32.to_le_bytes());
+        // Dimensions (Int64 little endian) - make a minimal 1x1 array
+        data.extend_from_slice(&1u64.to_le_bytes()); // dim0 (slow)
+        data.extend_from_slice(&1u64.to_le_bytes()); // dim1 (fast)
+        // Chunk dimensions (Int64 little endian)
+        data.extend_from_slice(&1u64.to_le_bytes()); // chunk dim0
+        data.extend_from_slice(&1u64.to_le_bytes()); // chunk dim1
+
+        // Now the LUT and the data BLOB would follow. They are not strictly required for this test.
+
+        // Write file
+        fs::write(file, &data).unwrap();
     }
 
     // Try to open the legacy file and check properties of the reader
@@ -1006,6 +1032,15 @@ async fn test_opening_legacy_file() -> Result<(), Box<dyn std::error::Error>> {
     let read_backend = MmapFile::new(file_for_reading, FileAccessMode::ReadOnly)?;
     let async_reader = OmFileReaderAsync::new(Arc::new(read_backend)).await?;
     assert_eq!(async_reader.name(), "");
+    assert_eq!(async_reader.number_of_children(), 0);
+
+    let array = async_reader.expect_array()?;
+    assert_eq!(array.data_type(), OmDataType::FloatArray);
+    assert_eq!(array.get_dimensions(), &[1, 1]);
+    assert_eq!(array.get_chunk_dimensions(), &[1, 1]);
+    assert_eq!(array.compression(), OmCompressionType::PforDelta2dInt16);
+    assert_eq!(array.add_offset(), 0.0);
+    assert_eq!(array.scale_factor(), 1.0);
 
     // Clean up
     remove_file_if_exists(file);
