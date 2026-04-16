@@ -22,7 +22,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 memmap2 = "0.9"
-om-file-format-sys = { git = "https://github.com/open-meteo/om-file-format", rev = "4a9ecdcc28e6fc762cf3542a5d7ae3832b7d1f3c" }
+om-file-format-sys = { git = "https://github.com/open-meteo/om-file-format", rev = "18bee8578d953bd95ad7de1ae688faa7cf421f7c" }
 ndarray = "0.17"
 num-traits = "0.2"
 thiserror = "2.0"
