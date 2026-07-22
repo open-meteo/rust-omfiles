@@ -158,6 +158,8 @@ impl OmFileReaderBackend for MmapFile {
 }
 
 impl OmFileReaderBackendAsync for MmapFile {
+    type Bytes = Vec<u8>;
+
     fn count_async(&self) -> usize {
         self.data.len()
     }
