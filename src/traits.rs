@@ -154,6 +154,9 @@ pub trait OmFileReaderBackend: Send + Sync {
 
 /// A trait for reading byte data asynchronously from different storage backends.
 pub trait OmFileReaderBackendAsync: Send + Sync {
+    /// The owned byte container returned by [`get_bytes_async`](Self::get_bytes_async).
+    type Bytes: Deref<Target = [u8]> + Send + Sync + 'static;
+
     /// Length in bytes
     fn count_async(&self) -> usize;
 
@@ -161,7 +164,7 @@ pub trait OmFileReaderBackendAsync: Send + Sync {
         &self,
         _offset: u64,
         _count: u64,
-    ) -> impl Future<Output = Result<Vec<u8>, OmFilesError>> + Send;
+    ) -> impl Future<Output = Result<Self::Bytes, OmFilesError>> + Send;
 }
 
 pub(crate) trait OmFileVariableImpl {
