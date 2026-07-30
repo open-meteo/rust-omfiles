@@ -11,6 +11,8 @@ mod variable;
 pub mod writer;
 pub(crate) mod backends {
     mod file;
+    #[cfg(target_os = "linux")]
+    pub mod io_uring;
     pub mod memory;
     pub mod mmapfile;
 }
@@ -27,6 +29,8 @@ pub(crate) mod utils {
 }
 mod errors;
 
+#[cfg(target_os = "linux")]
+pub use backends::io_uring::{IoUringBackend, IoUringBytes};
 pub use backends::memory::InMemoryBackend;
 pub use backends::mmapfile::{FileAccessMode, MmapFile};
 pub use core::compression::OmCompressionType;
