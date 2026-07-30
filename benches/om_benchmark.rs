@@ -5,7 +5,6 @@ use omfiles::OmCompressionType;
 use omfiles::{
     InMemoryBackend, reader::OmFileReader, reader_async::OmFileReaderAsync, writer::OmFileWriter,
 };
-use rand::Rng;
 use std::{
     borrow::BorrowMut,
     fs::{self, File},

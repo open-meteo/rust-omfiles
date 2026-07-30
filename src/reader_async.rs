@@ -117,7 +117,7 @@ impl<Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileReaderAsyn
 
         Ok(Self {
             backend,
-            variable: OmVariablePtr::new(header_vec),
+            variable: OmVariablePtr::new(header_vec)?,
             offset_size: OmOffsetSize {
                 offset: 0,
                 size: header_size as u64,
@@ -302,7 +302,7 @@ impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncA
                 },
             )?;
 
-            let mut task_handles: Vec<Task<Result<(Vec<u8>, OmRange_t), OmFilesError>>> =
+            let mut task_handles: Vec<Task<Result<(Backend::Bytes, OmRange_t), OmFilesError>>> =
                 Vec::with_capacity(chunk_infos.len());
 
             // Spawn a task for each chunk info
@@ -327,7 +327,8 @@ impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncA
             }
 
             // Run the executor to process all tasks
-            let mut chunk_data: Vec<(Vec<u8>, OmRange_t)> = Vec::with_capacity(task_handles.len());
+            let mut chunk_data: Vec<(Backend::Bytes, OmRange_t)> =
+                Vec::with_capacity(task_handles.len());
             get_executor()
                 .run(async {
                     for handle in task_handles {
@@ -384,5 +385,5 @@ async fn create_variable_from_offset<Backend: OmFileReaderBackendAsync>(
         .get_bytes_async(offset_size.offset, offset_size.size)
         .await?;
     let var_vec: Vec<u8> = var_data.to_vec();
-    Ok(OmVariablePtr::new(var_vec))
+    OmVariablePtr::new(var_vec)
 }

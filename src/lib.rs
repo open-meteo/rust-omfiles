@@ -22,6 +22,7 @@ mod core {
 }
 pub(crate) mod utils {
     pub mod buffered_writer;
+    pub mod byte_range;
     pub mod reader_utils;
     pub mod wrapped_decoder;
 }
