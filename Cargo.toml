@@ -27,17 +27,20 @@ ndarray = "0.17"
 num-traits = "0.2"
 thiserror = "2.0"
 async-lock = "3.4"
-async-executor = "1.13"
-io-uring = "0.6.0"
-oneshot = "0.1.11"
-smol = "2.0.2"
-flume = "0.11.1"
+futures-util = "0.3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+io-uring = "0.6"
+oneshot = "0.1"
+flume = "0.11"
 
 [dev-dependencies]
-criterion = "0.8"
+criterion = { version = "0.8", features = ["async_smol"] }
 rand = "0.10"
+smol = "2.0"
 smol-macros = "0.1"
 macro_rules_attribute = "0.2"
+libc = "0.2"
 
 [[bench]]
 name = "om_benchmark"

@@ -10,23 +10,15 @@ use crate::traits::{
 use crate::traits::{OmFileArrayDataType, OmFileAsyncReadableImpl};
 use crate::utils::reader_utils::process_trailer;
 use crate::variable::OmVariablePtr;
-use async_executor::{Executor, Task};
 use async_lock::Semaphore;
+use futures_util::{StreamExt, stream::FuturesUnordered};
 use ndarray::ArrayD;
 use num_traits::Zero;
-use om_file_format_sys::{
-    OmHeaderType_t, OmRange_t, om_header_size, om_header_type, om_trailer_size,
-};
+use om_file_format_sys::{OmHeaderType_t, om_header_size, om_header_type, om_trailer_size};
 use std::ffi::c_void;
 use std::num::NonZeroUsize;
 use std::ops::Range;
-use std::sync::{Arc, OnceLock};
-
-/// Global executor for handling asynchronous tasks
-static EXECUTOR: OnceLock<Executor> = OnceLock::new();
-fn get_executor() -> &'static Executor<'static> {
-    EXECUTOR.get_or_init(|| Executor::new())
-}
+use std::sync::Arc;
 
 /// Represents any variable in an OmFile and allows access to it via an async backend.
 pub struct OmFileReaderAsync<Backend> {
@@ -302,15 +294,16 @@ impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncA
                 },
             )?;
 
-            let mut task_handles: Vec<Task<Result<(Backend::Bytes, OmRange_t), OmFilesError>>> =
-                Vec::with_capacity(chunk_infos.len());
+            let mut fetches = FuturesUnordered::new();
 
-            // Spawn a task for each chunk info
+            // Create one future per data range. FuturesUnordered polls them
+            // concurrently without requiring a global executor or forcing
+            // the futures to be 'static.
             for (offset, count, chunk_index) in chunk_infos {
                 let backend = self.backend.clone();
                 let semaphore_clone = self.semaphore.clone();
 
-                let task = get_executor().spawn(async move {
+                fetches.push(async move {
                     // Acquire permit limiting concurrency
                     let permit = semaphore_clone.acquire_arc().await;
 
@@ -323,23 +316,12 @@ impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncA
 
                     result
                 });
-                task_handles.push(task);
             }
 
-            // Run the executor to process all tasks
-            let mut chunk_data: Vec<(Backend::Bytes, OmRange_t)> =
-                Vec::with_capacity(task_handles.len());
-            get_executor()
-                .run(async {
-                    for handle in task_handles {
-                        match handle.await {
-                            Ok(result) => chunk_data.push(result),
-                            Err(e) => return Err(OmFilesError::TaskError(e.to_string())),
-                        }
-                    }
-                    Ok::<_, OmFilesError>(())
-                })
-                .await?;
+            let mut chunk_data = Vec::new();
+            while let Some(result) = fetches.next().await {
+                chunk_data.push(result?);
+            }
 
             // Decode all chunks sequentially.
             // This could also potentially be parallelized using a thread pool.

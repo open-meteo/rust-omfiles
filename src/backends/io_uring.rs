@@ -1,82 +1,140 @@
-use crate::errors::OmFilesError;
-use crate::traits::OmFileReaderBackendAsync;
+//! Linux `io_uring` reader backend.
+
+use crate::{
+    errors::OmFilesError, traits::OmFileReaderBackendAsync, utils::byte_range::checked_byte_range,
+};
 use flume::{Receiver, Sender};
 use io_uring::{IoUring, opcode, types};
-use oneshot;
-use std::fs::File;
-use std::os::unix::io::AsRawFd;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::{collections::HashMap, fs::File, ops::Deref, os::fd::AsRawFd, thread::JoinHandle};
 
+const DEFAULT_QUEUE_DEPTH: u32 = 32;
+const REQUEST_CHANNEL_CAPACITY_FACTOR: usize = 4;
+
+/// Bytes returned by [`IoUringBackend`].
+///
+/// The underlying allocation is returned to the backend's buffer pool when
+/// this value is dropped. If the backend has already shut down, the allocation
+/// is simply freed.
+pub struct IoUringBytes {
+    buffer: Option<Vec<u8>>,
+    recycle_tx: Sender<Vec<u8>>,
+}
+
+impl IoUringBytes {
+    fn new(buffer: Vec<u8>, recycle_tx: Sender<Vec<u8>>) -> Self {
+        Self {
+            buffer: Some(buffer),
+            recycle_tx,
+        }
+    }
+}
+
+impl Deref for IoUringBytes {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.buffer
+            .as_deref()
+            .expect("io_uring byte buffer is present until drop")
+    }
+}
+
+impl Drop for IoUringBytes {
+    fn drop(&mut self) {
+        if let Some(mut buffer) = self.buffer.take() {
+            buffer.clear();
+            let _ = self.recycle_tx.send(buffer);
+        }
+    }
+}
+
+/// Asynchronous file reader backed by a dedicated `io_uring` worker.
 pub struct IoUringBackend {
     size: usize,
-    operation_tx: Sender<IoRequest>,
-    _io_thread: std::thread::JoinHandle<()>,
-    shutdown: Arc<AtomicBool>,
+    operation_tx: Option<Sender<IoRequest>>,
+    recycle_tx: Sender<Vec<u8>>,
+    io_thread: Option<JoinHandle<()>>,
 }
 
 struct IoRequest {
     offset: u64,
-    size: u64,
-    response: oneshot::Sender<Result<Vec<u8>, OmFilesError>>,
+    size: usize,
+    response: oneshot::Sender<Result<IoUringBytes, OmFilesError>>,
+}
+
+struct PendingOperation {
+    response: oneshot::Sender<Result<IoUringBytes, OmFilesError>>,
+    buffer: Vec<u8>,
+    expected_size: usize,
 }
 
 impl Drop for IoUringBackend {
     fn drop(&mut self) {
-        // Signal the IO thread to shut down
-        self.shutdown.store(true, Ordering::SeqCst);
+        // Closing the request channel tells the worker to drain all requests
+        // it has already accepted and then shut down.
+        self.operation_tx.take();
+
+        if let Some(io_thread) = self.io_thread.take()
+            && io_thread.join().is_err()
+        {
+            // Drop cannot report an error. The worker avoids panicking, so
+            // reaching this means an unexpected panic occurred.
+            eprintln!("io_uring worker panicked during shutdown");
+        }
     }
 }
 
 impl IoUringBackend {
+    /// Create a backend from an open file.
     pub fn new(file: File, queue_depth: Option<u32>) -> Result<Self, OmFilesError> {
-        let queue_depth = queue_depth.unwrap_or(32);
+        let queue_depth = queue_depth.unwrap_or(DEFAULT_QUEUE_DEPTH);
+        if queue_depth == 0 {
+            return Err(reader_error(
+                0,
+                "io_uring queue depth must be greater than zero",
+            ));
+        }
 
-        // Get file size
-        let size = file
-            .metadata()
-            .map_err(|e| OmFilesError::FileWriterError {
-                errno: e.raw_os_error().unwrap_or(0),
-                error: format!("Failed to get file metadata: {}", e),
-            })?
-            .len() as usize;
+        let size_u64 = file.metadata().map_err(map_reader_io_error)?.len();
+        let size = usize::try_from(size_u64)
+            .map_err(|_| reader_error(0, format!("file size {size_u64} does not fit in usize")))?;
 
-        // Set up the shutdown flag
-        let shutdown = Arc::new(AtomicBool::new(false));
+        // Construct the ring before starting the worker so setup failures are
+        // returned directly to the caller.
+        let mut ring = IoUring::new(queue_depth).map_err(map_reader_io_error)?;
+        let actual_queue_depth = ring.submission().capacity();
+        let channel_capacity = actual_queue_depth
+            .saturating_mul(REQUEST_CHANNEL_CAPACITY_FACTOR)
+            .max(1);
+        let (operation_tx, operation_rx) = flume::bounded(channel_capacity);
+        let (recycle_tx, recycle_rx) = flume::unbounded();
+        let worker_recycle_tx = recycle_tx.clone();
 
-        // Create the channel for sending operations
-        let (operation_tx, operation_rx) = flume::bounded(1000);
-
-        // Create a clone of the file for the io thread
-        let io_file = file
-            .try_clone()
-            .map_err(|e| OmFilesError::FileWriterError {
-                errno: e.raw_os_error().unwrap_or(0),
-                error: format!("Failed to clone file: {}", e),
-            })?;
-        let io_shutdown = shutdown.clone();
-
-        // Start the io thread
-        let io_thread = std::thread::spawn(move || {
-            if let Err(e) = io_thread_main(io_file, queue_depth, operation_rx, io_shutdown) {
-                eprintln!("IO thread error: {:?}", e);
-            }
-        });
+        let io_thread = std::thread::Builder::new()
+            .name("omfiles-io-uring".to_string())
+            .spawn(move || {
+                io_thread_main(file, ring, operation_rx, recycle_rx, worker_recycle_tx);
+            })
+            .map_err(map_reader_io_error)?;
 
         Ok(Self {
             size,
-            operation_tx,
-            _io_thread: io_thread,
-            shutdown,
+            operation_tx: Some(operation_tx),
+            recycle_tx,
+            io_thread: Some(io_thread),
         })
     }
 
-    pub fn from_path(path: &str, queue_depth: Option<u32>) -> Result<Self, OmFilesError> {
-        let file = File::open(path).map_err(|e| OmFilesError::CannotOpenFile {
-            filename: path.to_string(),
-            errno: e.raw_os_error().unwrap_or(0),
-            error: e.to_string(),
+    /// Open a file and create an `io_uring` backend for it.
+    pub fn from_path(
+        path: impl AsRef<std::path::Path>,
+        queue_depth: Option<u32>,
+    ) -> Result<Self, OmFilesError> {
+        let path = path.as_ref();
+        let file = File::open(path).map_err(|error| OmFilesError::CannotOpenFile {
+            filename: path.display().to_string(),
+            errno: error.raw_os_error().unwrap_or(0),
+            error: error.to_string(),
         })?;
 
         Self::new(file, queue_depth)
@@ -84,266 +142,268 @@ impl IoUringBackend {
 }
 
 impl OmFileReaderBackendAsync for IoUringBackend {
+    type Bytes = IoUringBytes;
+
     fn count_async(&self) -> usize {
         self.size
     }
 
-    async fn get_bytes_async(&self, offset: u64, count: u64) -> Result<Vec<u8>, OmFilesError> {
-        // Create a oneshot channel for the response
-        let (response_tx, response_rx) = oneshot::channel();
+    async fn get_bytes_async(&self, offset: u64, count: u64) -> Result<Self::Bytes, OmFilesError> {
+        let range = checked_byte_range(offset, count, self.size)?;
+        let size = range.len();
+        u32::try_from(size).map_err(|_| OmFilesError::InvalidBackendRead {
+            offset,
+            count,
+            size: self.size,
+        })?;
 
-        // Create the request
+        if size == 0 {
+            return Ok(IoUringBytes::new(Vec::new(), self.recycle_tx.clone()));
+        }
+
+        let (response_tx, response_rx) = oneshot::channel();
         let request = IoRequest {
             offset,
-            size: count,
+            size,
             response: response_tx,
         };
 
-        // Send the request to the io thread
         self.operation_tx
-            .send(request)
-            .map_err(|_| OmFilesError::FileWriterError {
-                errno: 0,
-                error: "IO thread disconnected".into(),
-            })?;
+            .as_ref()
+            .ok_or_else(|| reader_error(0, "io_uring worker is shutting down"))?
+            .send_async(request)
+            .await
+            .map_err(|_| reader_error(0, "io_uring worker disconnected"))?;
 
-        // Wait for the response
         response_rx
-            .recv()
-            .map_err(|_| OmFilesError::FileWriterError {
-                errno: 0,
-                error: "Response channel closed".into(),
-            })?
+            .await
+            .map_err(|_| reader_error(0, "io_uring response channel closed"))?
     }
 }
 
 fn io_thread_main(
     file: File,
-    queue_depth: u32,
+    mut ring: IoUring,
     operation_rx: Receiver<IoRequest>,
-    shutdown: Arc<AtomicBool>,
-) -> Result<(), OmFilesError> {
-    // Create the io_uring instance
-    let mut ring = IoUring::new(queue_depth).map_err(|e| OmFilesError::FileWriterError {
-        errno: e.raw_os_error().unwrap_or(0),
-        error: format!("Failed to create io_uring: {}", e),
-    })?;
+    recycle_rx: Receiver<Vec<u8>>,
+    recycle_tx: Sender<Vec<u8>>,
+) {
+    let max_in_flight = ring.submission().capacity();
+    let mut buffer_pool = Vec::with_capacity(max_in_flight);
+    let mut pending = HashMap::<u64, PendingOperation>::with_capacity(max_in_flight);
+    let mut next_operation_id = 1_u64;
+    let mut request_channel_closed = false;
 
-    // // Try to register the file - optimization, non-critical if it fails
-    // let file_registered = ring.registrar().register_files(&[file.as_raw_fd()]).is_ok();
-    // if !file_registered {
-    //     eprintln!("Warning: Failed to register file with io_uring. Performance might be slightly reduced.");
-    // }
+    loop {
+        drain_recycled_buffers(&recycle_rx, &mut buffer_pool);
 
-    // Buffer pool (simple version for demonstration)
-    // A more sophisticated pool (e.g., sharded, size-classed) could be better.
-    let mut buffer_pool: Vec<Vec<u8>> = Vec::with_capacity(queue_depth as usize);
+        if pending.is_empty() && !request_channel_closed {
+            match operation_rx.recv() {
+                Ok(request) => {
+                    if let Err(request) = enqueue_request(
+                        &file,
+                        &mut ring,
+                        &mut pending,
+                        &mut buffer_pool,
+                        &mut next_operation_id,
+                        request,
+                    ) {
+                        fail_request(request, 0, "io_uring submission queue is full");
+                    }
+                }
+                Err(_) => request_channel_closed = true,
+            }
+        }
 
-    // Map to store pending operation ID -> (response_tx, buffer)
-    let mut pending_ops: std::collections::HashMap<
-        u64,
-        (oneshot::Sender<Result<Vec<u8>, OmFilesError>>, Vec<u8>),
-    > = std::collections::HashMap::with_capacity(queue_depth as usize);
-    let mut next_op_id: u64 = 1; // Use unique IDs for user_data
-
-    // Main loop: batch submissions and process completions
-    while !shutdown.load(Ordering::Relaxed) {
-        let mut submitted_ops_in_batch = 0;
-        let mut made_progress = false;
-
-        // --- Phase 1: Collect and Submit Requests ---
-        // Try to fill the submission queue or process a reasonable batch size
-        let ring_capacity = ring.submission().capacity();
-        let batch_capacity = ring_capacity - ring.submission().len();
-        let max_batch_size = std::cmp::min(batch_capacity, queue_depth as usize / 2); // Example batch limit
-
-        for _ in 0..max_batch_size {
+        while pending.len() < max_in_flight && !request_channel_closed {
             match operation_rx.try_recv() {
                 Ok(request) => {
-                    made_progress = true; // We received a request
-                    let op_id = next_op_id;
-                    next_op_id += 1;
-
-                    // Get or allocate buffer
-                    let buffer_size = request.size as usize;
-                    let mut buffer = buffer_pool
-                        .pop()
-                        .unwrap_or_else(|| Vec::with_capacity(buffer_size));
-                    if buffer.capacity() < buffer_size {
-                        buffer.reserve_exact(buffer_size - buffer.capacity());
-                    }
-                    // SAFETY: We ensure capacity above and will write into it via io_uring
-                    unsafe {
-                        buffer.set_len(buffer_size);
-                    }
-
-                    // Prepare the read operation
-                    let read_e = opcode::Read::new(
-                        types::Fd(file.as_raw_fd()),
-                        buffer.as_mut_ptr(),
-                        buffer.len() as u32,
-                    )
-                    .offset(request.offset)
-                    .build()
-                    .user_data(op_id); // Use unique ID
-
-                    // Store pending operation details BEFORE pushing to SQ
-                    pending_ops.insert(op_id, (request.response, buffer));
-
-                    // Push to submission queue (unsafe block needed)
-                    // SAFETY: We ensure the SQ has capacity before this loop.
-                    // `pending_ops` holds the buffer and sender, ensuring they live long enough.
-                    unsafe {
-                        match ring.submission().push(&read_e) {
-                            Ok(_) => submitted_ops_in_batch += 1,
-                            Err(e) => {
-                                // Failed to push (likely SQ full despite check, handle gracefully)
-                                eprintln!(
-                                    "Error pushing to submission queue (should be rare): {}",
-                                    e
-                                );
-                                // Retrieve the op we just failed to submit
-                                let (response, failed_buffer) = pending_ops.remove(&op_id).unwrap();
-                                let _ = response.send(Err(OmFilesError::FileWriterError {
-                                    errno: 0, // Consider mapping the error code if possible
-                                    error: "Failed to push to submission queue".into(),
-                                }));
-                                buffer_pool.push(failed_buffer); // Return buffer
-                                break; // Stop trying to submit more in this batch
-                            }
-                        }
+                    if let Err(request) = enqueue_request(
+                        &file,
+                        &mut ring,
+                        &mut pending,
+                        &mut buffer_pool,
+                        &mut next_operation_id,
+                        request,
+                    ) {
+                        fail_request(request, 0, "io_uring submission queue is full");
+                        break;
                     }
                 }
-                Err(flume::TryRecvError::Empty) => {
-                    // No more requests waiting in the channel for now
-                    break;
-                }
+                Err(flume::TryRecvError::Empty) => break,
                 Err(flume::TryRecvError::Disconnected) => {
-                    // Sender disconnected, initiate shutdown
-                    shutdown.store(true, Ordering::Relaxed);
-                    break; // Exit outer loop soon
+                    request_channel_closed = true;
                 }
             }
         }
 
-        // --- Phase 2: Submit Operations (if any) ---
-        if submitted_ops_in_batch > 0 {
-            // Submit all queued operations to the kernel.
-            // Use submit() which doesn't block waiting for completions.
-            match ring.submit() {
-                Ok(submitted_count) => {
-                    if submitted_count < submitted_ops_in_batch {
-                        // This might happen under heavy load or specific kernel versions.
-                        // The unsubmitted ops are still in the SQ ring buffer.
-                        eprintln!(
-                            "Warning: Submitted fewer ops ({}) than pushed ({})",
-                            submitted_count, submitted_ops_in_batch
-                        );
-                    }
-                }
-                Err(e) => {
-                    // This is a more serious error, potentially affecting multiple ops.
-                    // We might need to fail pending ops associated with this submission attempt.
-                    // For simplicity now, just log it. A robust implementation would need
-                    // to carefully track which ops were part of the failed submit.
-                    eprintln!("Critical error during ring.submit(): {}", e);
-                    // Consider how to handle pending_ops related to this failed submit
-                }
+        if request_channel_closed && pending.is_empty() {
+            // All accepted requests have completed. No SQE still references a
+            // userspace buffer, so it is safe to destroy the pool and ring.
+            break;
+        }
+
+        if !pending.is_empty() {
+            if let Err(error) = ring.submit_and_wait(1) {
+                let errno = error.raw_os_error().unwrap_or(0);
+                let message = format!("io_uring submission failed: {error}");
+
+                // Destroy the ring before freeing any pending buffer. Ring
+                // teardown cancels/drains operations that still reference
+                // those buffers.
+                drop(ring);
+                fail_all_pending(&mut pending, errno, &message);
+                fail_queued_requests(&operation_rx, errno, &message);
+                return;
             }
+
+            process_completions(&mut ring, &mut pending, &mut buffer_pool, &recycle_tx);
         }
+    }
+}
 
-        // --- Phase 3: Process Completions ---
-        // Check completion queue regardless of submission
-        let cq_drained = ring.completion().is_empty(); // Check if empty *before* iterating
-        for cqe in ring.completion() {
-            made_progress = true; // We processed a completion
-            let op_id = cqe.user_data();
+fn enqueue_request(
+    file: &File,
+    ring: &mut IoUring,
+    pending: &mut HashMap<u64, PendingOperation>,
+    buffer_pool: &mut Vec<Vec<u8>>,
+    next_operation_id: &mut u64,
+    request: IoRequest,
+) -> Result<(), IoRequest> {
+    let operation_id = next_free_operation_id(pending, next_operation_id);
+    let mut buffer = take_buffer(buffer_pool, request.size);
+    let read = opcode::Read::new(
+        types::Fd(file.as_raw_fd()),
+        buffer.as_mut_ptr(),
+        request.size as u32,
+    )
+    .offset(request.offset)
+    .build()
+    .user_data(operation_id);
 
-            if let Some((response_tx, mut buffer)) = pending_ops.remove(&op_id) {
-                let bytes_read_or_err = cqe.result();
-
-                if bytes_read_or_err < 0 {
-                    // Error occurred
-                    let error = std::io::Error::from_raw_os_error(-bytes_read_or_err);
-                    let _ = response_tx.send(Err(OmFilesError::FileWriterError {
-                        errno: error.raw_os_error().unwrap_or(0),
-                        error: format!("io_uring read error: {}", error),
-                    }));
-                    // Return buffer to pool on error
-                    // SAFETY: Clear buffer before reuse in case of partial read on error
-                    unsafe {
-                        buffer.set_len(0);
-                    }
-                    buffer_pool.push(buffer);
-                } else {
-                    // Success
-                    let bytes_read = bytes_read_or_err as usize;
-                    // SAFETY: io_uring guarantees buffer is filled up to bytes_read
-                    unsafe {
-                        buffer.set_len(bytes_read);
-                    }
-
-                    // Send the successful result (buffer is moved)
-                    let _ = response_tx.send(Ok(buffer));
-                    // Buffer is NOT returned to pool here, it's owned by the receiver now
-                }
-            } else {
-                // Spurious completion or op_id mismatch - should be rare
-                eprintln!(
-                    "Warning: Received completion for unknown or already completed op_id: {}",
-                    op_id
-                );
-            }
-        }
-
-        // --- Phase 4: Wait Strategy ---
-        if !made_progress && !shutdown.load(Ordering::Relaxed) {
-            // No requests received and no completions processed.
-            // Wait efficiently for new events (requests or completions).
-            // Use submit_and_wait(0) if possible, otherwise fallback to timeout.
-            // submit_and_wait(0) waits for completions without submitting anything new.
-            if ring.submission().is_empty() {
-                // Only wait if SQ is empty, otherwise submit might be needed first
-                match ring.submit_and_wait(0) {
-                    Ok(_) => {} // Waited successfully, loop will check completions again
-                    Err(e) if e.raw_os_error() == Some(4032) => {
-                        // EBUSY might mean SQPOLL thread is active, just yield
-                        std::thread::yield_now();
-                    }
-                    Err(e) => {
-                        // Other wait error
-                        eprintln!("Error during submit_and_wait(0): {}", e);
-                        std::thread::sleep(Duration::from_millis(1)); // Fallback sleep
-                    }
-                }
-            } else {
-                // SQ not empty, try submitting first in next loop iteration
-                std::thread::yield_now();
-            }
-        } else if cq_drained && !ring.completion().is_empty() {
-            // If CQ *was* empty but now isn't after processing, yield to allow
-            // potentially woken tasks to run before we loop again.
-            std::thread::yield_now();
-        }
-    } // End while !shutdown
-
-    // --- Shutdown Phase ---
-    // Handle any remaining pending operations (e.g., send error)
-    eprintln!(
-        "IO thread shutting down. {} operations pending.",
-        pending_ops.len()
-    );
-    for (_op_id, (response_tx, mut buffer)) in pending_ops.drain() {
-        let _ = response_tx.send(Err(OmFilesError::FileWriterError {
-            errno: 0,
-            error: "IO operation cancelled due to shutdown".into(),
-        }));
-        // Return buffer to pool
-        unsafe {
-            buffer.set_len(0);
-        }
+    // The buffer has length zero, but has at least `request.size` bytes of
+    // capacity. It stays in `pending` at the same stable allocation until the
+    // matching CQE arrives.
+    if unsafe { ring.submission().push(&read) }.is_err() {
         buffer_pool.push(buffer);
+        return Err(request);
     }
 
+    pending.insert(
+        operation_id,
+        PendingOperation {
+            response: request.response,
+            buffer,
+            expected_size: request.size,
+        },
+    );
     Ok(())
+}
+
+fn process_completions(
+    ring: &mut IoUring,
+    pending: &mut HashMap<u64, PendingOperation>,
+    buffer_pool: &mut Vec<Vec<u8>>,
+    recycle_tx: &Sender<Vec<u8>>,
+) {
+    for completion in ring.completion() {
+        let Some(mut operation) = pending.remove(&completion.user_data()) else {
+            continue;
+        };
+
+        let result = completion.result();
+        if result < 0 {
+            let error = std::io::Error::from_raw_os_error(-result);
+            let _ = operation.response.send(Err(map_reader_io_error(error)));
+            buffer_pool.push(operation.buffer);
+            continue;
+        }
+
+        let bytes_read = result as usize;
+        if bytes_read != operation.expected_size {
+            let error = reader_error(
+                0,
+                format!(
+                    "short io_uring read: expected {} bytes, received {bytes_read}",
+                    operation.expected_size
+                ),
+            );
+            let _ = operation.response.send(Err(error));
+            buffer_pool.push(operation.buffer);
+            continue;
+        }
+
+        // SAFETY: The CQE reports that exactly `bytes_read` bytes were written
+        // to a buffer with at least that much capacity.
+        unsafe {
+            operation.buffer.set_len(bytes_read);
+        }
+        let bytes = IoUringBytes::new(operation.buffer, recycle_tx.clone());
+        if let Err(send_error) = operation.response.send(Ok(bytes)) {
+            // Dropping the unsent response recycles its buffer.
+            drop(send_error.into_inner());
+        }
+    }
+}
+
+fn take_buffer(buffer_pool: &mut Vec<Vec<u8>>, size: usize) -> Vec<u8> {
+    let mut buffer = buffer_pool.pop().unwrap_or_default();
+    buffer.clear();
+    if buffer.capacity() < size {
+        // `reserve_exact` takes an amount additional to the current length,
+        // not additional to the current capacity. The buffer length is zero.
+        buffer.reserve_exact(size);
+    }
+    buffer
+}
+
+fn drain_recycled_buffers(recycle_rx: &Receiver<Vec<u8>>, buffer_pool: &mut Vec<Vec<u8>>) {
+    while let Ok(mut buffer) = recycle_rx.try_recv() {
+        buffer.clear();
+        buffer_pool.push(buffer);
+    }
+}
+
+fn next_free_operation_id(
+    pending: &HashMap<u64, PendingOperation>,
+    next_operation_id: &mut u64,
+) -> u64 {
+    loop {
+        let candidate = *next_operation_id;
+        *next_operation_id = next_operation_id.wrapping_add(1);
+        if candidate != 0 && !pending.contains_key(&candidate) {
+            return candidate;
+        }
+    }
+}
+
+fn fail_request(request: IoRequest, errno: i32, message: &str) {
+    let _ = request
+        .response
+        .send(Err(reader_error(errno, message.to_string())));
+}
+
+fn fail_all_pending(pending: &mut HashMap<u64, PendingOperation>, errno: i32, message: &str) {
+    for (_, operation) in pending.drain() {
+        let _ = operation
+            .response
+            .send(Err(reader_error(errno, message.to_string())));
+    }
+}
+
+fn fail_queued_requests(operation_rx: &Receiver<IoRequest>, errno: i32, message: &str) {
+    while let Ok(request) = operation_rx.try_recv() {
+        fail_request(request, errno, message);
+    }
+}
+
+fn map_reader_io_error(error: std::io::Error) -> OmFilesError {
+    reader_error(error.raw_os_error().unwrap_or(0), error.to_string())
+}
+
+fn reader_error(errno: i32, error: impl Into<String>) -> OmFilesError {
+    OmFilesError::FileReaderError {
+        errno,
+        error: error.into(),
+    }
 }
