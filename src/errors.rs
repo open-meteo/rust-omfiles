@@ -11,6 +11,8 @@ pub enum OmFilesError {
     },
     #[error("File writer error: errno {errno}, error: {error}")]
     FileWriterError { errno: i32, error: String },
+    #[error("File reader error: errno {errno}, error: {error}")]
+    FileReaderError { errno: i32, error: String },
     #[error("Chunk has wrong number of elements")]
     ChunkHasWrongNumberOfElements,
     #[error(
