@@ -526,8 +526,8 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(&bytes[0..3], &[79, 77, 3]);
         assert_eq!(&bytes[3..8], &[0, 3, 34, 140, 2]);
         // difference on x86 and ARM cause by the underlying compression
-        assert!(&bytes[8..12] == &[2, 3, 114, 1] || &bytes[8..12] == &[2, 3, 114, 141]);
-        assert!(&bytes[12..16] == &[6, 3, 34, 0] || &bytes[12..16] == &[6, 3, 34, 140]);
+        assert!(bytes[8..12] == [2, 3, 114, 1] || bytes[8..12] == [2, 3, 114, 141]);
+        assert!(bytes[12..16] == [6, 3, 34, 0] || bytes[12..16] == [6, 3, 34, 140]);
 
         assert_eq!(&bytes[16..19], &[8, 194, 2]);
         assert_eq!(&bytes[19..23], &[18, 5, 226, 3]);
@@ -572,7 +572,7 @@ fn test_write_3d() -> Result<(), Box<dyn std::error::Error>> {
 fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
     let file = "test_hierarchical.om";
     remove_file_if_exists(file);
-    write_hierarchical_file(&file)?;
+    write_hierarchical_file(file)?;
 
     {
         // Verify the hierarchical structure
@@ -626,7 +626,7 @@ fn test_hierarchical_variables() -> Result<(), Box<dyn std::error::Error>> {
         let subchild_data = subchild.expect_array()?.read::<f32>(&[0..4, 0..500])?;
         let expected_subchild = ArrayD::from_shape_vec(
             vec![4, 500],
-            vec![(30..2030).map(|x| x as f32).collect::<Vec<f32>>()].concat(),
+            [(30..2030).map(|x| x as f32).collect::<Vec<f32>>()].concat(),
         )
         .unwrap();
         assert_eq!(subchild_data, expected_subchild);
@@ -995,7 +995,7 @@ async fn test_opening_legacy_file() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut data: Vec<u8> = Vec::new();
         // Magic: "OM"
-        data.extend_from_slice(&[b'O', b'M']);
+        data.extend_from_slice(b"OM");
         // Version: 2 (legacy)
         data.push(2u8);
         // Compression type with filter: pfor_delta2d_int16
@@ -1106,7 +1106,7 @@ async fn test_read_async() -> Result<(), Box<dyn std::error::Error>> {
             .await?;
         let expected_subchild = ArrayD::from_shape_vec(
             vec![4, 500],
-            vec![(30..2030).map(|x| x as f32).collect::<Vec<f32>>()].concat(),
+            [(30..2030).map(|x| x as f32).collect::<Vec<f32>>()].concat(),
         )
         .unwrap();
         assert_eq!(subchild_data, expected_subchild);
@@ -1173,7 +1173,7 @@ fn nd_assert_eq_with_accuracy_and_nan(
     }
 }
 
-fn vec_u64_to_vec_usize(input: &Vec<u64>) -> Vec<usize> {
+fn vec_u64_to_vec_usize(input: &[u64]) -> Vec<usize> {
     input.iter().map(|&x| x as usize).collect()
 }
 
@@ -1239,7 +1239,7 @@ where
     let subchild_chunks = vec![2, 2];
     let subchild_data = ArrayD::from_shape_vec(
         vec_u64_to_vec_usize(&subchild_dims),
-        vec![(30..2030).map(|x| x as f32).collect::<Vec<f32>>()].concat(),
+        [(30..2030).map(|x| x as f32).collect::<Vec<f32>>()].concat(),
     )
     .unwrap();
 

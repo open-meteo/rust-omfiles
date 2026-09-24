@@ -162,7 +162,7 @@ impl<'a, Backend> OmFileVariableImpl for OmFileScalar<'a, Backend> {
         self.variable
     }
     fn offset_size(&self) -> &OmOffsetSize {
-        &self.offset_size
+        self.offset_size
     }
 }
 
@@ -173,7 +173,7 @@ impl<'a, Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileSca
         &self,
         offset_size: OmOffsetSize,
     ) -> Result<OmFileReader<Backend>, OmFilesError> {
-        let variable = create_variable_from_offset(&self.backend, &offset_size)?;
+        let variable = create_variable_from_offset(self.backend, &offset_size)?;
         Ok(OmFileReader {
             backend: self.backend.clone(),
             variable,
@@ -208,7 +208,7 @@ impl<'a, Backend: OmFileReaderBackend> OmFileReadableImpl<Backend> for OmFileArr
         &self,
         offset_size: OmOffsetSize,
     ) -> Result<OmFileReader<Backend>, OmFilesError> {
-        let variable = create_variable_from_offset(&self.backend, &offset_size)?;
+        let variable = create_variable_from_offset(self.backend, &offset_size)?;
         Ok(OmFileReader {
             backend: self.backend.clone(),
             variable,

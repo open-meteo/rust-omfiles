@@ -35,7 +35,6 @@ impl<'a> WrappedDecoder<'a> {
     /// Initialize the decoder with read parameters
     pub(crate) fn new(
         variable: &'a OmVariablePtr,
-        dims: u64,
         read_offset: Vec<u64>,
         read_count: Vec<u64>,
         cube_offset: &'a [u64],
@@ -48,7 +47,7 @@ impl<'a> WrappedDecoder<'a> {
             om_decoder_init(
                 &mut decoder,
                 variable.as_ptr(),
-                dims,
+                read_count.len() as u64,
                 read_offset.as_ptr(),
                 read_count.as_ptr(),
                 cube_offset.as_ptr(),

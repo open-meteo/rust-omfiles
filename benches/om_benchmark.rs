@@ -7,7 +7,6 @@ use omfiles::{
 use std::{
     borrow::BorrowMut,
     fs::{self, File},
-    hint::black_box,
     time::{Duration, Instant},
 };
 
@@ -62,10 +61,10 @@ pub fn benchmark_in_memory(c: &mut Criterion) {
                     )
                     .unwrap();
 
-                black_box(writer.write_data(data.view(), None, None).unwrap());
+                writer.write_data(data.view(), None, None).unwrap();
                 let variable_meta = writer.finalize();
                 let variable = file_writer.write_array(variable_meta, "data", &[]).unwrap();
-                black_box(file_writer.write_trailer(variable).unwrap());
+                file_writer.write_trailer(variable).unwrap();
             }
             timer.stop();
             timer.elapsed()
@@ -92,7 +91,7 @@ pub fn benchmark_write(c: &mut Criterion) {
             for _i in 0..iters {
                 remove_file_if_exists(file);
                 timer.start();
-                black_box(write_om_file(file, data.view()));
+                write_om_file(file, data.view());
                 timer.stop();
             }
             timer.elapsed()

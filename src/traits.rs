@@ -232,7 +232,6 @@ pub(crate) trait OmArrayVariableImpl: OmFileVariableImpl {
         // Initialize decoder
         let decoder = crate::utils::wrapped_decoder::WrappedDecoder::new(
             self.variable(),
-            n_dimensions_read as u64,
             read_offset,
             read_count,
             into_cube_offset,
@@ -326,10 +325,10 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
     fn get_child_by_name(&self, name: &str) -> Option<OmFileReader<Backend>> {
         for i in 0..self.number_of_children() {
             let child = self.get_child_by_index(i);
-            if let Some(child) = child {
-                if child.name() == name {
-                    return Some(child);
-                }
+            if let Some(child) = child
+                && child.name() == name
+            {
+                return Some(child);
             }
         }
         None
@@ -459,10 +458,10 @@ pub(crate) trait OmFileAsyncReadableImpl<Backend: OmFileReaderBackendAsync>:
     async fn get_child_by_name(&self, name: &str) -> Option<OmFileReaderAsync<Backend>> {
         for i in 0..self.number_of_children() {
             let child = self.get_child_by_index(i).await;
-            if let Some(child) = child {
-                if child.name() == name {
-                    return Some(child);
-                }
+            if let Some(child) = child
+                && child.name() == name
+            {
+                return Some(child);
             }
         }
         None

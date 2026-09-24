@@ -32,51 +32,48 @@ pub enum OmDataType {
 }
 
 impl OmDataType {
-    pub(crate) fn to_c(&self) -> OmDataType_t {
-        unsafe { std::mem::transmute(*self as u32) }
+    pub(crate) fn to_c(self) -> OmDataType_t {
+        unsafe { std::mem::transmute(self as u32) }
     }
 
     /// Check if the data type is an array type.
     pub fn is_array(&self) -> bool {
-        match self {
+        matches!(
+            self,
             OmDataType::Int8Array
-            | OmDataType::Uint8Array
-            | OmDataType::Int16Array
-            | OmDataType::Uint16Array
-            | OmDataType::Int32Array
-            | OmDataType::Uint32Array
-            | OmDataType::Int64Array
-            | OmDataType::Uint64Array
-            | OmDataType::FloatArray
-            | OmDataType::DoubleArray => true,
-            _ => false,
-        }
+                | OmDataType::Uint8Array
+                | OmDataType::Int16Array
+                | OmDataType::Uint16Array
+                | OmDataType::Int32Array
+                | OmDataType::Uint32Array
+                | OmDataType::Int64Array
+                | OmDataType::Uint64Array
+                | OmDataType::FloatArray
+                | OmDataType::DoubleArray
+        )
     }
 
     /// Check if the data type is a scalar type.
     pub fn is_scalar(&self) -> bool {
-        match self {
+        matches!(
+            self,
             OmDataType::Int8
-            | OmDataType::Uint8
-            | OmDataType::Int16
-            | OmDataType::Uint16
-            | OmDataType::Int32
-            | OmDataType::Uint32
-            | OmDataType::Int64
-            | OmDataType::Uint64
-            | OmDataType::Float
-            | OmDataType::Double
-            | OmDataType::String => true,
-            _ => false,
-        }
+                | OmDataType::Uint8
+                | OmDataType::Int16
+                | OmDataType::Uint16
+                | OmDataType::Int32
+                | OmDataType::Uint32
+                | OmDataType::Int64
+                | OmDataType::Uint64
+                | OmDataType::Float
+                | OmDataType::Double
+                | OmDataType::String
+        )
     }
 
     /// Check if the data type is a group.
     pub fn is_group(&self) -> bool {
-        match self {
-            OmDataType::None => true,
-            _ => false,
-        }
+        matches!(self, OmDataType::None)
     }
 }
 
@@ -195,7 +192,7 @@ impl OmFileScalarDataType for OmNone {
     const DATA_TYPE_SCALAR: OmDataType = OmDataType::None;
 
     fn from_raw_bytes(bytes: &[u8]) -> Self {
-        assert!(bytes.len() == 0, "OmNone should not have any bytes");
+        assert!(bytes.is_empty(), "OmNone should not have any bytes");
         // None type doesn't contain any data, so just return the default value
         OmNone()
     }

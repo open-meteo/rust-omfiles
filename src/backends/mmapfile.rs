@@ -114,7 +114,7 @@ impl MmapFile {
     fn prefetch_data_advice(&self, offset: usize, count: usize, advice: MAdvice) {
         let page_size = 4096;
         let page_start = offset / page_size * page_size;
-        let page_end = (offset + count + page_size - 1) / page_size * page_size;
+        let page_end = (offset + count).div_ceil(page_size) * page_size;
         let length = page_end - page_start;
         // Note: length can be greater than data size, due to page cache alignment
         // precondition(length <= data.count, "Prefetch read exceeds length. Length=\(length) data count=\(data.count)")
@@ -124,7 +124,6 @@ impl MmapFile {
             .advice(&self.data, offset, length)
             .map_err(|e| {
                 eprintln!("Failed to set memory advice: {}", e);
-                ()
             })
             .unwrap_or(())
     }

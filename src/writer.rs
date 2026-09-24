@@ -238,10 +238,7 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
         if dimensions.len() != chunk_dimensions.len() {
             return Err(OmFilesError::MismatchingCubeDimensionLength);
         }
-        if dimensions.is_empty()
-            || dimensions.iter().any(|&dim| dim == 0)
-            || chunk_dimensions.iter().any(|&dim| dim == 0)
-        {
+        if dimensions.is_empty() || dimensions.contains(&0) || chunk_dimensions.contains(&0) {
             return Err(OmFilesError::DimensionMustBeLargerThan0);
         }
 
@@ -350,7 +347,7 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
             .reallocate(self.compressed_chunk_buffer_size as usize * 4)?;
 
         let number_of_chunks_in_array =
-            unsafe { om_encoder_count_chunks_in_array(&mut self.encoder, array_count.as_ptr()) };
+            unsafe { om_encoder_count_chunks_in_array(&self.encoder, array_count.as_ptr()) };
 
         if self.chunk_index == 0 {
             self.look_up_table[self.chunk_index as usize] = self.buffer.total_bytes_written as u64;
@@ -366,7 +363,7 @@ impl<'a, OmType: OmFileArrayDataType, Backend: OmFileWriterBackend>
 
             let bytes_written = unsafe {
                 om_encoder_compress_chunk(
-                    &mut self.encoder,
+                    &self.encoder,
                     array.as_ptr() as *const c_void,
                     array_dimensions.as_ptr(),
                     array_offset.as_ptr(),
