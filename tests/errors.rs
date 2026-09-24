@@ -119,7 +119,7 @@ fn test_mismatching_cube_dimension_length_for_read() {
 
     let reader = OmFileReader::new(Arc::new(backend)).unwrap();
     let reader = reader.expect_array().unwrap();
-    let result = reader.read::<i32>(&[0..10]);
+    let result = reader.read::<i32>(std::slice::from_ref(&(0..10)));
 
     assert_eq!(error_string(result), "Mismatching cube dimension length");
 }
@@ -161,10 +161,7 @@ fn test_opening_not_an_om_file() {
 
 fn error_string<T>(result: Result<T, OmFilesError>) -> String {
     match result {
-        Ok(_) => {
-            assert!(false, "Expected error");
-            String::new() // This line will never be reached
-        }
+        Ok(_) => panic!("Expected error"),
         Err(e) => e.to_string(),
     }
 }

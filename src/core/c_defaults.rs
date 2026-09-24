@@ -29,6 +29,6 @@ pub fn new_data_read(index_read: &OmDecoder_indexRead_t) -> OmDecoder_dataRead_t
 
 pub fn c_error_string(error: OmError_t) -> String {
     let ptr = unsafe { om_error_string(error) };
-    let error_string = unsafe { std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned() };
-    error_string
+
+    unsafe { std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned() }
 }

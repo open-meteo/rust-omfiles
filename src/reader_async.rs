@@ -21,10 +21,12 @@ use std::num::NonZeroUsize;
 use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
+type ChunkFetch<Bytes> = Task<Result<(Bytes, OmRange_t), OmFilesError>>;
+
 /// Global executor for handling asynchronous tasks
 static EXECUTOR: OnceLock<Executor> = OnceLock::new();
 fn get_executor() -> &'static Executor<'static> {
-    EXECUTOR.get_or_init(|| Executor::new())
+    EXECUTOR.get_or_init(Executor::new)
 }
 
 /// Represents any variable in an OmFile and allows access to it via an async backend.
@@ -189,7 +191,7 @@ impl<'a, Backend: OmFileReaderBackendAsync> OmFileAsyncReadableImpl<Backend>
         &self,
         offset: OmOffsetSize,
     ) -> Result<OmFileReaderAsync<Backend>, OmFilesError> {
-        let variable = create_variable_from_offset(&self.backend, &offset).await?;
+        let variable = create_variable_from_offset(self.backend, &offset).await?;
         Ok(OmFileReaderAsync {
             backend: self.backend.clone(),
             variable,
@@ -301,7 +303,7 @@ impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncA
                 },
             )?;
 
-            let mut task_handles: Vec<Task<Result<(Backend::Bytes, OmRange_t), OmFilesError>>> =
+            let mut task_handles: Vec<ChunkFetch<Backend::Bytes>> =
                 Vec::with_capacity(chunk_infos.len());
 
             // Spawn a task for each chunk info
@@ -353,7 +355,7 @@ impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncA
 
                 std::slice::from_raw_parts_mut(
                     output_slice.as_mut_ptr() as *mut u8,
-                    output_slice.len() * std::mem::size_of::<T>(),
+                    std::mem::size_of_val(output_slice),
                 )
             };
             let results: Vec<Result<(), OmFilesError>> = chunk_data
@@ -365,9 +367,7 @@ impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncA
 
             // Check for errors
             for result in results {
-                if let Err(e) = result {
-                    return Err(e);
-                }
+                result?;
             }
         }
 

@@ -10,24 +10,24 @@ use crate::{errors::OmFilesError, traits::OmFileWriterBackend};
 
 impl OmFileWriterBackend for &File {
     fn write(&mut self, data: &[u8]) -> Result<(), OmFilesError> {
-        self.write_all(data).map_err(|e| map_io_error(e))?;
+        self.write_all(data).map_err(map_io_error)?;
         Ok(())
     }
 
     fn synchronize(&self) -> Result<(), OmFilesError> {
-        self.sync_all().map_err(|e| map_io_error(e))?;
+        self.sync_all().map_err(map_io_error)?;
         Ok(())
     }
 }
 
 impl OmFileWriterBackend for File {
     fn write(&mut self, data: &[u8]) -> Result<(), OmFilesError> {
-        self.write_all(data).map_err(|e| map_io_error(e))?;
+        self.write_all(data).map_err(map_io_error)?;
         Ok(())
     }
 
     fn synchronize(&self) -> Result<(), OmFilesError> {
-        self.sync_all().map_err(|e| map_io_error(e))?;
+        self.sync_all().map_err(map_io_error)?;
         Ok(())
     }
 }
