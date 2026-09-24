@@ -1,20 +1,14 @@
 //! All traits related to the Open-Meteo file format.
-use crate::core::c_defaults::{c_error_string, new_data_read, new_index_read};
 use crate::core::data_types::OmDataType;
 use crate::errors::OmFilesError;
 use crate::reader::OmFileReader;
 use crate::reader_async::OmFileReaderAsync;
 use crate::variable::{OmOffsetSize, OmVariablePtr};
-use ndarray::ArrayD;
-use om_file_format_sys::{
-    OmDecoder_t, OmError_t, om_decoder_decode_chunks, om_decoder_next_data_read,
-    om_decoder_next_index_read, om_variable_get_children,
-};
+use om_file_format_sys::om_variable_get_children;
 #[cfg(feature = "metadata-tree")]
 use std::collections::HashMap;
 use std::future::Future;
 use std::ops::{Deref, Range};
-use std::os::raw::c_void;
 
 // Accessible within the crate, but downstream crates cannot name or implement it.
 // OmFileArrayDataType and OmFileScalarDataType are part of the public interface
@@ -88,59 +82,6 @@ pub trait OmFileReaderBackend: Send + Sync {
     /// This might be a borrowed slice for zero-copy backends (like mmap)
     /// or an owned `Vec<u8>` for others (like file IO).
     fn get_bytes(&self, offset: u64, count: u64) -> Result<Self::Bytes<'_>, OmFilesError>;
-
-    fn decode<OmType: OmFileArrayDataType>(
-        &self,
-        decoder: &OmDecoder_t,
-        into: &mut ArrayD<OmType>,
-        chunk_buffer: &mut [u8],
-    ) -> Result<(), OmFilesError> {
-        let into_ptr = into
-            .as_slice_mut()
-            .ok_or(OmFilesError::ArrayNotContiguous)?
-            .as_mut_ptr();
-
-        let mut index_read = new_index_read(decoder);
-        unsafe {
-            // Loop over index blocks and read index data
-            while om_decoder_next_index_read(decoder, &mut index_read) {
-                let index_data = self.get_bytes(index_read.offset, index_read.count)?;
-
-                let mut data_read = new_data_read(&index_read);
-
-                let mut error = OmError_t::ERROR_OK;
-
-                // Loop over data blocks and read compressed data chunks
-                while om_decoder_next_data_read(
-                    decoder,
-                    &mut data_read,
-                    index_data.as_ptr() as *const c_void,
-                    index_read.count,
-                    &mut error,
-                ) {
-                    let data_data = self.get_bytes(data_read.offset, data_read.count)?;
-
-                    if !om_decoder_decode_chunks(
-                        decoder,
-                        data_read.chunkIndex,
-                        data_data.as_ptr() as *const c_void,
-                        data_read.count,
-                        into_ptr as *mut c_void,
-                        chunk_buffer.as_mut_ptr() as *mut c_void,
-                        &mut error,
-                    ) {
-                        let error_string = c_error_string(error);
-                        return Err(OmFilesError::DecoderError(error_string));
-                    }
-                }
-                if error != OmError_t::ERROR_OK {
-                    let error_string = c_error_string(error);
-                    return Err(OmFilesError::DecoderError(error_string));
-                }
-            }
-        }
-        Ok(())
-    }
 }
 
 /// A trait for reading byte data asynchronously from different storage backends.
@@ -189,7 +130,7 @@ impl<T: OmFileVariableImpl> OmFileVariable for T {
     fn data_type(&self) -> OmDataType {
         unsafe {
             OmDataType::try_from(
-                om_file_format_sys::om_variable_get_type(*&self.variable().ptr) as u8,
+                om_file_format_sys::om_variable_get_type(self.variable().as_ptr()) as u8,
             )
             .expect("Invalid data type")
         }
@@ -198,7 +139,8 @@ impl<T: OmFileVariableImpl> OmFileVariable for T {
     fn name(&self) -> &str {
         unsafe {
             let mut length = 0u16;
-            let name = om_file_format_sys::om_variable_get_name(*&self.variable().ptr, &mut length);
+            let name =
+                om_file_format_sys::om_variable_get_name(self.variable().as_ptr(), &mut length);
             if name.is_null() || length == 0 {
                 return "";
             }
@@ -208,7 +150,7 @@ impl<T: OmFileVariableImpl> OmFileVariable for T {
     }
 
     fn number_of_children(&self) -> u32 {
-        unsafe { om_file_format_sys::om_variable_get_children_count(*&self.variable().ptr) }
+        unsafe { om_file_format_sys::om_variable_get_children_count(self.variable().as_ptr()) }
     }
 }
 
@@ -223,7 +165,11 @@ pub(crate) trait OmScalarVariableImpl: OmFileVariableImpl + OmFileVariable {
         let mut size: u64 = 0;
 
         let error = unsafe {
-            om_file_format_sys::om_variable_get_scalar(*&self.variable().ptr, &mut ptr, &mut size)
+            om_file_format_sys::om_variable_get_scalar(
+                self.variable().as_ptr(),
+                &mut ptr,
+                &mut size,
+            )
         };
 
         if error != om_file_format_sys::OmError_t::ERROR_OK || ptr.is_null() {
@@ -254,77 +200,17 @@ impl<T: OmScalarVariableImpl> OmScalarVariable for T {
 pub(crate) trait OmArrayVariableImpl: OmFileVariableImpl {
     fn io_size_max(&self) -> u64;
     fn io_size_merge(&self) -> u64;
-}
-
-/// An array variable in an OmFile.
-pub trait OmArrayVariable {
-    /// Returns the compression type of the variable
-    fn compression(&self) -> crate::core::compression::OmCompressionType;
-    /// Returns the scale factor of the variable
-    fn scale_factor(&self) -> f32;
-    /// Returns the add offset of the variable
-    fn add_offset(&self) -> f32;
-    /// Returns the dimensions of the variable
-    fn get_dimensions(&self) -> &[u64];
-    /// Returns the chunk dimensions of the variable
-    fn get_chunk_dimensions(&self) -> &[u64];
 
     /// Prepare common parameters for reading data
-    fn prepare_read_parameters<T: OmFileArrayDataType>(
-        &self,
+    fn prepare_read_parameters<'a, U: OmFileArrayDataType>(
+        &'a self,
         dim_read: &[Range<u64>],
-        into_cube_offset: &[u64],
-        into_cube_dimension: &[u64],
-    ) -> Result<crate::utils::wrapped_decoder::WrappedDecoder, OmFilesError>;
-}
-
-// Blanket implementation of OmArrayVariable for types implementing OmArrayVariableImpl
-impl<T: OmArrayVariableImpl> OmArrayVariable for T {
-    /// Returns the compression type of the variable
-    fn compression(&self) -> crate::core::compression::OmCompressionType {
-        unsafe {
-            crate::core::compression::OmCompressionType::try_from(
-                om_file_format_sys::om_variable_get_compression(*&self.variable().ptr) as u8,
-            )
-            .expect("Invalid compression type")
-        }
-    }
-
-    /// Returns the scale factor of the variable
-    fn scale_factor(&self) -> f32 {
-        unsafe { om_file_format_sys::om_variable_get_scale_factor(*&self.variable().ptr) }
-    }
-
-    /// Returns the add offset of the variable
-    fn add_offset(&self) -> f32 {
-        unsafe { om_file_format_sys::om_variable_get_add_offset(*&self.variable().ptr) }
-    }
-
-    /// Returns the dimensions of the variable
-    fn get_dimensions(&self) -> &[u64] {
-        unsafe {
-            let count = om_file_format_sys::om_variable_get_dimensions_count(*&self.variable().ptr);
-            let dims = om_file_format_sys::om_variable_get_dimensions(*&self.variable().ptr);
-            std::slice::from_raw_parts(dims, count as usize)
-        }
-    }
-
-    /// Returns the chunk dimensions of the variable
-    fn get_chunk_dimensions(&self) -> &[u64] {
-        unsafe {
-            let count = om_file_format_sys::om_variable_get_dimensions_count(*&self.variable().ptr);
-            let chunks = om_file_format_sys::om_variable_get_chunks(*&self.variable().ptr);
-            std::slice::from_raw_parts(chunks, count as usize)
-        }
-    }
-
-    /// Prepare common parameters for reading data
-    fn prepare_read_parameters<U: OmFileArrayDataType>(
-        &self,
-        dim_read: &[Range<u64>],
-        into_cube_offset: &[u64],
-        into_cube_dimension: &[u64],
-    ) -> Result<crate::utils::wrapped_decoder::WrappedDecoder, OmFilesError> {
+        into_cube_offset: &'a [u64],
+        into_cube_dimension: &'a [u64],
+    ) -> Result<crate::utils::wrapped_decoder::WrappedDecoder<'a>, OmFilesError>
+    where
+        Self: Sized,
+    {
         if U::DATA_TYPE_ARRAY != self.data_type() {
             return Err(OmFilesError::InvalidDataType);
         }
@@ -359,6 +245,63 @@ impl<T: OmArrayVariableImpl> OmArrayVariable for T {
     }
 }
 
+/// An array variable in an OmFile.
+pub trait OmArrayVariable {
+    /// Returns the compression type of the variable
+    fn compression(&self) -> crate::core::compression::OmCompressionType;
+    /// Returns the scale factor of the variable
+    fn scale_factor(&self) -> f32;
+    /// Returns the add offset of the variable
+    fn add_offset(&self) -> f32;
+    /// Returns the dimensions of the variable
+    fn get_dimensions(&self) -> &[u64];
+    /// Returns the chunk dimensions of the variable
+    fn get_chunk_dimensions(&self) -> &[u64];
+}
+
+// Blanket implementation of OmArrayVariable for types implementing OmArrayVariableImpl
+impl<T: OmArrayVariableImpl> OmArrayVariable for T {
+    /// Returns the compression type of the variable
+    fn compression(&self) -> crate::core::compression::OmCompressionType {
+        unsafe {
+            crate::core::compression::OmCompressionType::try_from(
+                om_file_format_sys::om_variable_get_compression(self.variable().as_ptr()) as u8,
+            )
+            .expect("Invalid compression type")
+        }
+    }
+
+    /// Returns the scale factor of the variable
+    fn scale_factor(&self) -> f32 {
+        unsafe { om_file_format_sys::om_variable_get_scale_factor(self.variable().as_ptr()) }
+    }
+
+    /// Returns the add offset of the variable
+    fn add_offset(&self) -> f32 {
+        unsafe { om_file_format_sys::om_variable_get_add_offset(self.variable().as_ptr()) }
+    }
+
+    /// Returns the dimensions of the variable
+    fn get_dimensions(&self) -> &[u64] {
+        unsafe {
+            let count =
+                om_file_format_sys::om_variable_get_dimensions_count(self.variable().as_ptr());
+            let dims = om_file_format_sys::om_variable_get_dimensions(self.variable().as_ptr());
+            std::slice::from_raw_parts(dims, count as usize)
+        }
+    }
+
+    /// Returns the chunk dimensions of the variable
+    fn get_chunk_dimensions(&self) -> &[u64] {
+        unsafe {
+            let count =
+                om_file_format_sys::om_variable_get_dimensions_count(self.variable().as_ptr());
+            let chunks = om_file_format_sys::om_variable_get_chunks(self.variable().as_ptr());
+            std::slice::from_raw_parts(chunks, count as usize)
+        }
+    }
+}
+
 pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
     OmFileVariableImpl + OmFileVariable
 {
@@ -371,7 +314,7 @@ pub(crate) trait OmFileReadableImpl<Backend: OmFileReaderBackend>:
         let mut offset = 0u64;
         let mut size = 0u64;
         if !unsafe {
-            om_variable_get_children(*&self.variable().ptr, index, 1, &mut offset, &mut size)
+            om_variable_get_children(self.variable().as_ptr(), index, 1, &mut offset, &mut size)
         } {
             return None;
         }
@@ -504,7 +447,7 @@ pub(crate) trait OmFileAsyncReadableImpl<Backend: OmFileReaderBackendAsync>:
         let mut offset = 0u64;
         let mut size = 0u64;
         if !unsafe {
-            om_variable_get_children(*&self.variable().ptr, index, 1, &mut offset, &mut size)
+            om_variable_get_children(self.variable().as_ptr(), index, 1, &mut offset, &mut size)
         } {
             return None;
         }
