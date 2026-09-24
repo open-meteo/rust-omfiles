@@ -239,7 +239,7 @@ impl<'a, Backend: OmFileReaderBackend> OmFileArray<'a, Backend> {
         let decoder =
             self.prepare_read_parameters::<T>(dim_read, into_cube_offset, into_cube_dimension)?;
 
-        let mut chunk_buffer = Vec::<u8>::with_capacity(decoder.buffer_size() as usize);
+        let mut chunk_buffer = vec![0u8; decoder.buffer_size()];
         decoder.decode(self.backend.as_ref(), into, chunk_buffer.as_mut_slice())?;
 
         Ok(())
