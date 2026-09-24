@@ -5,7 +5,7 @@ use crate::backends::mmapfile::{FileAccessMode, MmapFile};
 use crate::errors::OmFilesError;
 use crate::traits::OmFileArrayDataType;
 use crate::traits::{
-    OmArrayVariable, OmArrayVariableImpl, OmFileReadableImpl, OmFileReaderBackend, OmFileVariable,
+    OmArrayVariableImpl, OmFileReadableImpl, OmFileReaderBackend, OmFileVariable,
     OmFileVariableImpl, OmScalarVariableImpl,
 };
 use crate::utils::reader_utils::process_trailer;
@@ -21,7 +21,7 @@ use std::sync::Arc;
 /// Represents any variable in an OmFile.
 ///
 /// Allows traversing the file hierarchy and can be downcast to a scalar or array variable.
-/// Therefore, the traits [`OmArrayVariable`], [`OmScalarVariable`](crate::traits::OmScalarVariable), and [`OmFileVariable`]
+/// Therefore, the traits [`OmArrayVariable`](crate::traits::OmArrayVariable), [`OmScalarVariable`](crate::traits::OmScalarVariable), and [`OmFileVariable`]
 /// need to be implemented and in scope.
 pub struct OmFileReader<Backend> {
     /// The backend that provides data via the get_bytes method
@@ -240,8 +240,7 @@ impl<'a, Backend: OmFileReaderBackend> OmFileArray<'a, Backend> {
             self.prepare_read_parameters::<T>(dim_read, into_cube_offset, into_cube_dimension)?;
 
         let mut chunk_buffer = Vec::<u8>::with_capacity(decoder.buffer_size() as usize);
-        self.backend
-            .decode(&decoder.decoder, into, chunk_buffer.as_mut_slice())?;
+        decoder.decode(self.backend.as_ref(), into, chunk_buffer.as_mut_slice())?;
 
         Ok(())
     }

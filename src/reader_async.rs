@@ -4,8 +4,7 @@ use crate::OmOffsetSize;
 use crate::errors::OmFilesError;
 use crate::reader::OmFileScalar;
 use crate::traits::{
-    OmArrayVariable, OmArrayVariableImpl, OmFileReaderBackendAsync, OmFileVariable,
-    OmFileVariableImpl,
+    OmArrayVariableImpl, OmFileReaderBackendAsync, OmFileVariable, OmFileVariableImpl,
 };
 use crate::traits::{OmFileArrayDataType, OmFileAsyncReadableImpl};
 use crate::utils::reader_utils::process_trailer;

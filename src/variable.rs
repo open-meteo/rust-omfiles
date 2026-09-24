@@ -39,18 +39,20 @@ impl OmOffsetSize {
 #[derive(Debug)]
 pub(crate) struct OmVariablePtr {
     /// The raw pointer to the C struct.
-    pub(crate) ptr: *const OmVariable_t,
+    ptr: *const OmVariable_t,
     /// Keeps the memory alive for this variable alive.
     _marker: Vec<u8>,
 }
 
-// Safety: We assert that the C library functions are thread-safe for read-only access.
-// By holding `_marker`, we ensure the memory backing `ptr` is not deallocated.
+// SAFETY: `ptr` points into the owned `_marker` allocation. Moving this wrapper
+// does not move that allocation, which remains alive and is never reallocated.
 unsafe impl Send for OmVariablePtr {}
+// SAFETY: The backing bytes are immutable after construction and the C variable
+// accessors only read them. Shared access does not mutate any retained state.
 unsafe impl Sync for OmVariablePtr {}
 
 impl OmVariablePtr {
-    /// Initialize a new variable pointer from an Arc slice.
+    /// Initialize a variable pointer anchored to the owned byte vector.
     pub(crate) fn new(data: Vec<u8>) -> Result<Self, OmFilesError> {
         let ptr = unsafe { om_variable_init(data.as_ptr() as *const c_void) };
         if ptr.is_null() {
