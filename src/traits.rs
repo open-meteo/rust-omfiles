@@ -15,57 +15,48 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::ops::{Deref, Range};
 use std::os::raw::c_void;
-use std::{mem, slice};
 
-/// Trait for types that can be stored as arrays in OmFiles
-pub trait OmFileArrayDataType {
+// Accessible within the crate, but downstream crates cannot name or implement it.
+// OmFileArrayDataType and OmFileScalarDataType are part of the public interface
+// and therefore need to be pub traits!
+pub(crate) mod sealed {
+    pub trait Sealed {}
+}
+
+/// Types supported as numeric arrays: fixed-width integers, `f32`, and `f64`.
+///
+/// This trait is sealed. Its implementations guarantee that the Rust element
+/// representation matches the associated OM type: no padding, drop glue, or
+/// invalid bit patterns. Typed array pointers retain the primitive's alignment.
+/// Downstream crates cannot add implementations.
+pub trait OmFileArrayDataType: sealed::Sealed {
     const DATA_TYPE_ARRAY: OmDataType;
 }
 
-/// Trait for types that can be stored as scalars in OmFiles
-pub trait OmFileScalarDataType: Default {
+/// Types supported as scalars: fixed-width integers, `f32`, `f64`, and `String`.
+///
+/// This trait is sealed; the crate also implements it for its internal group
+/// marker. Downstream crates cannot add implementations.
+pub trait OmFileScalarDataType: Default + sealed::Sealed {
     const DATA_TYPE_SCALAR: OmDataType;
 
-    /// Creates a new instance from raw bytes
+    /// Decode a scalar from bytes without requiring input alignment.
     ///
-    /// This is the default implementation, which assumes that the bytes
-    /// represent a valid value of Self and that alignment requirements are met.
-    fn from_raw_bytes(bytes: &[u8]) -> Self {
-        assert!(
-            bytes.len() >= mem::size_of::<Self>(),
-            "Buffer too small to contain type of size {}",
-            mem::size_of::<Self>()
-        );
-
-        // Safety: This assumes the bytes represent a valid value of Self
-        // and that alignment requirements are met
-        unsafe {
-            let mut result = Self::default();
-            std::ptr::copy_nonoverlapping(
-                bytes.as_ptr(),
-                &mut result as *mut Self as *mut u8,
-                mem::size_of::<Self>(),
-            );
-            result
-        }
-    }
-
-    /// Performs an operation with the raw bytes of this value
+    /// Numeric implementations read a little-endian prefix and ignore trailing
+    /// bytes. Strings use lossy UTF-8 decoding.
     ///
-    /// This is the default implementation, which passes a slice of the bytes
-    /// of self to the provided closure.
-    /// For String and OmNone types, this method is overridden to provide the
-    /// UTF-8 bytes of the string and an empty slice, respectively.
+    /// # Panics
+    /// Numeric implementations panic if fewer than `size_of::<Self>()` bytes
+    /// are supplied. The internal group marker requires an empty slice.
+    fn from_raw_bytes(bytes: &[u8]) -> Self;
+
+    /// Invoke a callback with the scalar's encoded bytes.
+    ///
+    /// Numeric bytes use little-endian byte order and storage aligned for the C
+    /// writer's integer loads. Strings expose UTF-8 bytes; groups expose none.
     fn with_raw_bytes<T, F>(&self, f: F) -> T
     where
-        F: FnOnce(&[u8]) -> T,
-    {
-        // Safety: This creates a slice that references the bytes of self
-        let bytes = unsafe {
-            slice::from_raw_parts(self as *const Self as *const u8, mem::size_of::<Self>())
-        };
-        f(bytes)
-    }
+        F: FnOnce(&[u8]) -> T;
 }
 
 /// A trait for writing byte data synchronously to different storage backends.
