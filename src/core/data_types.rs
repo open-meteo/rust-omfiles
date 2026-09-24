@@ -113,76 +113,59 @@ impl TryFrom<u8> for OmDataType {
     }
 }
 
-// Implement both traits for all supported numeric types
-impl OmFileArrayDataType for i8 {
-    const DATA_TYPE_ARRAY: OmDataType = OmDataType::Int8Array;
-}
-impl OmFileScalarDataType for i8 {
-    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Int8;
+// The C scalar writer loads numeric values through int16_t/int32_t/int64_t
+// pointers. A plain byte array does not guarantee the required alignment.
+#[repr(C, align(8))]
+struct ScalarBytes<const N: usize>([u8; N]);
+
+// Fixed-width primitives have no padding or invalid bit patterns. Keep their
+// sizes and OM mappings together; scalar bytes use little-endian encoding.
+macro_rules! impl_numeric_data_type {
+    ($ty:ty, $scalar:ident, $array:ident, $width:literal) => {
+        const _: () = {
+            assert!(std::mem::size_of::<$ty>() == $width);
+            assert!(std::mem::align_of::<ScalarBytes<$width>>() >= std::mem::align_of::<$ty>());
+        };
+
+        impl crate::traits::sealed::Sealed for $ty {}
+
+        impl OmFileArrayDataType for $ty {
+            const DATA_TYPE_ARRAY: OmDataType = OmDataType::$array;
+        }
+
+        impl OmFileScalarDataType for $ty {
+            const DATA_TYPE_SCALAR: OmDataType = OmDataType::$scalar;
+
+            fn from_raw_bytes(bytes: &[u8]) -> Self {
+                let mut value = [0; $width];
+                value.copy_from_slice(&bytes[..$width]);
+                Self::from_le_bytes(value)
+            }
+
+            fn with_raw_bytes<T, F>(&self, f: F) -> T
+            where
+                F: FnOnce(&[u8]) -> T,
+            {
+                let bytes = ScalarBytes(self.to_le_bytes());
+                f(&bytes.0)
+            }
+        }
+    };
 }
 
-impl OmFileArrayDataType for u8 {
-    const DATA_TYPE_ARRAY: OmDataType = OmDataType::Uint8Array;
-}
-impl OmFileScalarDataType for u8 {
-    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Uint8;
-}
+impl_numeric_data_type!(i8, Int8, Int8Array, 1);
+impl_numeric_data_type!(u8, Uint8, Uint8Array, 1);
+impl_numeric_data_type!(i16, Int16, Int16Array, 2);
+impl_numeric_data_type!(u16, Uint16, Uint16Array, 2);
+impl_numeric_data_type!(i32, Int32, Int32Array, 4);
+impl_numeric_data_type!(u32, Uint32, Uint32Array, 4);
+impl_numeric_data_type!(i64, Int64, Int64Array, 8);
+impl_numeric_data_type!(u64, Uint64, Uint64Array, 8);
+impl_numeric_data_type!(f32, Float, FloatArray, 4);
+impl_numeric_data_type!(f64, Double, DoubleArray, 8);
 
-impl OmFileArrayDataType for i16 {
-    const DATA_TYPE_ARRAY: OmDataType = OmDataType::Int16Array;
-}
-impl OmFileScalarDataType for i16 {
-    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Int16;
-}
-
-impl OmFileArrayDataType for u16 {
-    const DATA_TYPE_ARRAY: OmDataType = OmDataType::Uint16Array;
-}
-impl OmFileScalarDataType for u16 {
-    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Uint16;
-}
-
-impl OmFileArrayDataType for i32 {
-    const DATA_TYPE_ARRAY: OmDataType = OmDataType::Int32Array;
-}
-impl OmFileScalarDataType for i32 {
-    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Int32;
-}
-
-impl OmFileArrayDataType for u32 {
-    const DATA_TYPE_ARRAY: OmDataType = OmDataType::Uint32Array;
-}
-impl OmFileScalarDataType for u32 {
-    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Uint32;
-}
-
-impl OmFileArrayDataType for i64 {
-    const DATA_TYPE_ARRAY: OmDataType = OmDataType::Int64Array;
-}
-impl OmFileScalarDataType for i64 {
-    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Int64;
-}
-
-impl OmFileArrayDataType for u64 {
-    const DATA_TYPE_ARRAY: OmDataType = OmDataType::Uint64Array;
-}
-impl OmFileScalarDataType for u64 {
-    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Uint64;
-}
-
-impl OmFileArrayDataType for f32 {
-    const DATA_TYPE_ARRAY: OmDataType = OmDataType::FloatArray;
-}
-impl OmFileScalarDataType for f32 {
-    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Float;
-}
-
-impl OmFileArrayDataType for f64 {
-    const DATA_TYPE_ARRAY: OmDataType = OmDataType::DoubleArray;
-}
-impl OmFileScalarDataType for f64 {
-    const DATA_TYPE_SCALAR: OmDataType = OmDataType::Double;
-}
+impl crate::traits::sealed::Sealed for String {}
+impl crate::traits::sealed::Sealed for OmNone {}
 
 impl OmFileScalarDataType for String {
     const DATA_TYPE_SCALAR: OmDataType = OmDataType::String;
@@ -223,5 +206,48 @@ impl OmFileScalarDataType for OmNone {
     {
         // None type doesn't have any bytes, so pass an empty slice
         f(&[])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numeric_scalars_use_little_endian_bytes() {
+        let bytes = [0x78, 0x56, 0x34, 0x12];
+        assert_eq!(u32::from_raw_bytes(&bytes), 0x1234_5678);
+        0x1234_5678u32.with_raw_bytes(|encoded| assert_eq!(encoded, bytes));
+
+        let bytes = [0x00, 0x00, 0xc0, 0x3f];
+        assert_eq!(f32::from_raw_bytes(&bytes), 1.5);
+        1.5f32.with_raw_bytes(|encoded| assert_eq!(encoded, bytes));
+    }
+
+    #[test]
+    fn scalar_read_accepts_unaligned_input_and_ignores_trailing_bytes() {
+        // The prefix places the value one byte past an aligned address.
+        let storage = ScalarBytes([0xff, 8, 7, 6, 5, 4, 3, 2, 1, 0xee]);
+        assert_eq!(u64::from_raw_bytes(&storage.0[1..]), 0x0102_0304_0506_0708);
+    }
+
+    #[test]
+    fn scalar_write_provides_aligned_storage() {
+        // The widest integer load used by the C scalar writer requires this
+        // alignment. Float scalars use the same staging buffer.
+        42u64.with_raw_bytes(|bytes| {
+            assert_eq!(bytes.len(), 8);
+            assert_eq!(bytes.as_ptr().align_offset(std::mem::align_of::<i64>()), 0);
+        });
+        1.5f64.with_raw_bytes(|bytes| {
+            assert_eq!(bytes.len(), 8);
+            assert_eq!(bytes.as_ptr().align_offset(std::mem::align_of::<i64>()), 0);
+        });
+    }
+
+    #[test]
+    #[should_panic]
+    fn scalar_read_rejects_short_input() {
+        u64::from_raw_bytes(&[0; 7]);
     }
 }

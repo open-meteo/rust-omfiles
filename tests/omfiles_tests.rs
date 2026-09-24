@@ -1321,3 +1321,113 @@ where
     file_writer.write_trailer(parent_var)?;
     Ok(())
 }
+
+#[apply(test!)]
+async fn test_supported_numeric_types_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
+    use omfiles::traits::OmFileReaderBackendAsync;
+
+    // Reuse the checked memory backend for async reads without filesystem I/O.
+    struct AsyncMemory(Arc<InMemoryBackend>);
+    impl OmFileReaderBackendAsync for AsyncMemory {
+        type Bytes = Vec<u8>;
+
+        fn count_async(&self) -> usize {
+            self.0.count()
+        }
+
+        async fn get_bytes_async(&self, offset: u64, count: u64) -> Result<Vec<u8>, OmFilesError> {
+            Ok(self.0.get_bytes(offset, count)?.to_vec())
+        }
+    }
+
+    macro_rules! roundtrip {
+        ($ty:ty, $compression:ident, $scalar_values:expr, $array_values:expr) => {{
+            let scalar_values: &[$ty] = &$scalar_values;
+            let array_values: Vec<$ty> = $array_values.to_vec();
+            let mut backend = InMemoryBackend::new(vec![]);
+            let mut writer = OmFileWriter::new(&mut backend, 1024);
+            let mut children = Vec::new();
+            for &value in scalar_values {
+                children.push(writer.write_scalar(value, "scalar", &[])?);
+            }
+            let values = ArrayD::from_shape_vec(vec![2, 2], array_values.clone())?;
+            let mut array = writer.prepare_array::<$ty>(
+                vec![2, 2],
+                vec![2, 2],
+                OmCompressionType::$compression,
+                1.0,
+                0.0,
+            )?;
+            array.write_data(values.view(), None, None)?;
+            let array = array.finalize();
+            let root = writer.write_array(array, "array", &children)?;
+            writer.write_trailer(root)?;
+            drop(writer);
+
+            let backend = Arc::new(backend);
+            let reader = OmFileReader::new(backend.clone())?;
+            let async_reader =
+                OmFileReaderAsync::new(Arc::new(AsyncMemory(backend.clone()))).await?;
+            for (index, &expected) in scalar_values.iter().enumerate() {
+                let actual = reader
+                    .get_child_by_index(index as u32)
+                    .unwrap()
+                    .expect_scalar()?
+                    .read_scalar::<$ty>()
+                    .unwrap();
+                assert_eq!(actual.to_le_bytes(), expected.to_le_bytes());
+                // No children: the scalar payload follows the eight-byte metadata header.
+                let payload = backend.get_bytes(
+                    children[index].offset + 8,
+                    std::mem::size_of::<$ty>() as u64,
+                )?;
+                assert_eq!(payload, expected.to_le_bytes());
+            }
+            let sync_array = reader.expect_array()?.read::<$ty>(&[0..2, 0..2])?;
+            let async_array = async_reader
+                .expect_array()?
+                .read::<$ty>(&[0..2, 0..2])
+                .await?;
+            for ((actual, async_actual), expected) in
+                sync_array.iter().zip(async_array.iter()).zip(array_values)
+            {
+                assert_eq!(actual.to_le_bytes(), expected.to_le_bytes());
+                assert_eq!(async_actual.to_le_bytes(), expected.to_le_bytes());
+            }
+        }};
+    }
+
+    roundtrip!(i8, PforDelta2d, [i8::MIN, 0, i8::MAX], [-2i8, -1, 0, 1]);
+    roundtrip!(u8, PforDelta2d, [0, u8::MAX], [0u8, 1, 2, 3]);
+    roundtrip!(i16, PforDelta2d, [i16::MIN, 0, i16::MAX], [-2i16, -1, 0, 1]);
+    roundtrip!(u16, PforDelta2d, [0, u16::MAX], [0u16, 1, 2, 3]);
+    roundtrip!(i32, PforDelta2d, [i32::MIN, 0, i32::MAX], [-2i32, -1, 0, 1]);
+    roundtrip!(u32, PforDelta2d, [0, u32::MAX], [0u32, 1, 2, 3]);
+    roundtrip!(i64, PforDelta2d, [i64::MIN, 0, i64::MAX], [-2i64, -1, 0, 1]);
+    roundtrip!(u64, PforDelta2d, [0, u64::MAX], [0u64, 1, 2, 3]);
+    roundtrip!(
+        f32,
+        FpxXor2d,
+        [
+            0.0,
+            -0.0,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::from_bits(0x7fc0_1234)
+        ],
+        [0.0f32, -0.0, 1.5, -2.5]
+    );
+    roundtrip!(
+        f64,
+        FpxXor2d,
+        [
+            0.0,
+            -0.0,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::from_bits(0x7ff8_0000_0000_1234)
+        ],
+        [0.0f64, -0.0, 1.5, -2.5]
+    );
+    Ok(())
+}
