@@ -4,6 +4,7 @@ use crate::errors::OmFilesError;
 use crate::reader::OmFileReader;
 use crate::reader_async::OmFileReaderAsync;
 use crate::variable::{OmOffsetSize, OmVariablePtr};
+use ndarray::ArrayD;
 use om_file_format_sys::om_variable_get_children;
 #[cfg(feature = "metadata-tree")]
 use std::collections::HashMap;
@@ -201,46 +202,24 @@ pub(crate) trait OmArrayVariableImpl: OmFileVariableImpl {
     fn io_size_max(&self) -> u64;
     fn io_size_merge(&self) -> u64;
 
-    /// Prepare common parameters for reading data
-    fn prepare_read_parameters<'a, U: OmFileArrayDataType>(
-        &'a self,
+    /// Prepare a decoder bound to the destination array.
+    fn prepare_read_parameters<'config, 'output, U: OmFileArrayDataType>(
+        &'config self,
+        into: &'output mut ArrayD<U>,
         dim_read: &[Range<u64>],
-        into_cube_offset: &'a [u64],
-        into_cube_dimension: &'a [u64],
-    ) -> Result<crate::utils::wrapped_decoder::WrappedDecoder<'a>, OmFilesError>
+        into_cube_offset: &'config [u64],
+    ) -> Result<crate::utils::wrapped_decoder::WrappedDecoder<'config, 'output, U>, OmFilesError>
     where
         Self: Sized,
     {
-        if U::DATA_TYPE_ARRAY != self.data_type() {
-            return Err(OmFilesError::InvalidDataType);
-        }
-        let n_dimensions_read = dim_read.len();
-        let n_dims = self.get_dimensions().len();
-
-        // Validate dimension counts
-        if n_dims != n_dimensions_read
-            || n_dimensions_read != into_cube_offset.len()
-            || n_dimensions_read != into_cube_dimension.len()
-        {
-            return Err(OmFilesError::MismatchingCubeDimensionLength);
-        }
-
-        // Prepare read parameters
-        let read_offset: Vec<u64> = dim_read.iter().map(|r| r.start).collect();
-        let read_count: Vec<u64> = dim_read.iter().map(|r| r.end - r.start).collect();
-
-        // Initialize decoder
-        let decoder = crate::utils::wrapped_decoder::WrappedDecoder::new(
+        crate::utils::wrapped_decoder::WrappedDecoder::new(
             self.variable(),
-            read_offset,
-            read_count,
+            into,
+            dim_read,
             into_cube_offset,
-            into_cube_dimension,
             self.io_size_merge(),
             self.io_size_max(),
-        )?;
-
-        Ok(decoder)
+        )
     }
 }
 

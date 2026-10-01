@@ -1,5 +1,6 @@
 use ndarray::ArrayD;
 use omfiles::reader::OmFileReader;
+use omfiles::reader_async::OmFileReaderAsync;
 use omfiles::traits::OmFileWriterBackend;
 use omfiles::writer::OmFileWriter;
 use omfiles::{InMemoryBackend, MmapFile, OmCompressionType, OmFilesError};
@@ -8,7 +9,121 @@ use std::fs;
 use std::sync::Arc;
 
 mod test_utils;
-use test_utils::remove_file_if_exists;
+use test_utils::{AsyncMemory, remove_file_if_exists};
+
+#[macro_rules_attribute::apply(smol_macros::test!)]
+async fn test_reversed_source_ranges_return_errors() -> Result<(), OmFilesError> {
+    let mut backend = InMemoryBackend::new(vec![]);
+    write_i32_om_file(&mut backend)?;
+    let backend = Arc::new(backend);
+    let reader = OmFileReader::new(backend.clone())?;
+    let async_reader = OmFileReaderAsync::new(Arc::new(AsyncMemory(backend))).await?;
+    let array = reader.expect_array()?;
+    let async_array = async_reader.expect_array()?;
+    let reversed = std::ops::Range { start: 2, end: 1 };
+    let expected = OmFilesError::InvalidReadRange {
+        range: reversed.clone(),
+    };
+
+    for ranges in [[reversed.clone(), 0..1], [0..1, reversed]] {
+        assert_eq!(array.read::<i32>(&ranges).unwrap_err(), expected);
+        assert_eq!(
+            async_array.read::<i32>(&ranges).await.unwrap_err(),
+            expected
+        );
+
+        let mut output = ArrayD::from_elem(vec![10, 10], -1i32);
+        assert_eq!(
+            array.read_into(&mut output, &ranges, &[0, 0]).unwrap_err(),
+            expected
+        );
+        assert_eq!(
+            async_array
+                .read_into(&mut output, &ranges, &[0, 0])
+                .await
+                .unwrap_err(),
+            expected
+        );
+        assert!(output.iter().all(|&value| value == -1));
+    }
+    Ok(())
+}
+
+#[macro_rules_attribute::apply(smol_macros::test!)]
+async fn test_read_into_rejects_invalid_destinations() -> Result<(), OmFilesError> {
+    let mut backend = InMemoryBackend::new(vec![]);
+    write_i32_om_file(&mut backend)?;
+    let backend = Arc::new(backend);
+    let reader = OmFileReader::new(backend.clone())?;
+    let async_reader = OmFileReaderAsync::new(Arc::new(AsyncMemory(backend))).await?;
+    let array = reader.expect_array()?;
+    let async_array = async_reader.expect_array()?;
+
+    let mut output = ArrayD::from_elem(vec![1, 1], -1i32);
+    let result = array.read_into(&mut output, &[0..10, 0..10], &[0, 0]);
+    assert_eq!(
+        result,
+        Err(OmFilesError::OffsetAndCountExceedDimension {
+            offset: 0,
+            count: 10,
+            dimension: 1,
+        })
+    );
+    assert!(output.iter().all(|&value| value == -1));
+    assert_eq!(
+        async_array
+            .read_into(&mut output, &[0..10, 0..10], &[0, 0])
+            .await,
+        result
+    );
+    assert!(output.iter().all(|&value| value == -1));
+
+    for (shape, offset) in [(vec![100], vec![0, 0]), (vec![10, 10], vec![0])] {
+        let mut output = ArrayD::from_elem(shape, -1i32);
+        let result = array.read_into(&mut output, &[0..10, 0..10], &offset);
+        assert_eq!(result, Err(OmFilesError::MismatchingCubeDimensionLength));
+        assert!(output.iter().all(|&value| value == -1));
+        assert_eq!(
+            async_array
+                .read_into(&mut output, &[0..10, 0..10], &offset)
+                .await,
+            result,
+        );
+        assert!(output.iter().all(|&value| value == -1));
+    }
+
+    for offset in [[1, 0], [u64::MAX, 0]] {
+        let mut output = ArrayD::from_elem(vec![10, 10], -1i32);
+        let result = array.read_into(&mut output, &[0..10, 0..10], &offset);
+        assert!(matches!(
+            result,
+            Err(OmFilesError::OffsetAndCountExceedDimension { .. })
+        ));
+        assert!(output.iter().all(|&value| value == -1));
+        assert_eq!(
+            async_array
+                .read_into(&mut output, &[0..10, 0..10], &offset)
+                .await,
+            result
+        );
+        assert!(output.iter().all(|&value| value == -1));
+    }
+
+    // Contiguous storage in a different axis order is not a row-major destination.
+    let mut output = ArrayD::from_elem(vec![10, 10], -1i32).reversed_axes();
+    assert_eq!(
+        array.read_into(&mut output, &[0..10, 0..10], &[0, 0]),
+        Err(OmFilesError::ArrayNotContiguous)
+    );
+    assert_eq!(
+        async_array
+            .read_into(&mut output, &[0..10, 0..10], &[0, 0])
+            .await,
+        Err(OmFilesError::ArrayNotContiguous)
+    );
+    assert!(output.iter().all(|&value| value == -1));
+    Ok(())
+}
 
 #[test]
 fn test_mismatching_cube_dimension_length() {

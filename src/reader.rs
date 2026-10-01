@@ -8,7 +8,7 @@ use crate::traits::{
     OmArrayVariableImpl, OmFileReadableImpl, OmFileReaderBackend, OmFileVariable,
     OmFileVariableImpl, OmScalarVariableImpl,
 };
-use crate::utils::reader_utils::process_trailer;
+use crate::utils::reader_utils::{process_trailer, read_counts};
 use crate::variable::OmVariablePtr;
 use ndarray::ArrayD;
 use num_traits::Zero;
@@ -228,33 +228,31 @@ impl<'a, Backend> OmArrayVariableImpl for OmFileArray<'a, Backend> {
 }
 
 impl<'a, Backend: OmFileReaderBackend> OmFileArray<'a, Backend> {
-    /// Read a variable as an array of a dynamic data type.
+    /// Read source ranges into a standard-layout array at the destination offset.
+    ///
+    /// Destination dimensions are derived from `into.shape()`. The source ranges,
+    /// destination array, and destination offset must have the same rank, and the
+    /// read must fit within the destination array.
     pub fn read_into<T: OmFileArrayDataType>(
         &self,
         into: &mut ArrayD<T>,
         dim_read: &[Range<u64>],
         into_cube_offset: &[u64],
-        into_cube_dimension: &[u64],
     ) -> Result<(), OmFilesError> {
-        let decoder =
-            self.prepare_read_parameters::<T>(dim_read, into_cube_offset, into_cube_dimension)?;
-
-        let mut chunk_buffer = vec![0u8; decoder.buffer_size()];
-        decoder.decode(self.backend.as_ref(), into, chunk_buffer.as_mut_slice())?;
-
-        Ok(())
+        let mut decoder = self.prepare_read_parameters::<T>(into, dim_read, into_cube_offset)?;
+        decoder.decode(self.backend.as_ref())
     }
 
     pub fn read<T: OmFileArrayDataType + Clone + Zero>(
         &self,
         dim_read: &[Range<u64>],
     ) -> Result<ArrayD<T>, OmFilesError> {
-        let out_dims: Vec<u64> = dim_read.iter().map(|r| r.end - r.start).collect();
+        let out_dims = read_counts(dim_read)?;
         let out_dims_usize = out_dims.iter().map(|&x| x as usize).collect::<Vec<_>>();
 
         let mut out = ArrayD::<T>::zeros(out_dims_usize);
 
-        self.read_into::<T>(&mut out, dim_read, &vec![0; dim_read.len()], &out_dims)?;
+        self.read_into::<T>(&mut out, dim_read, &vec![0; dim_read.len()])?;
 
         Ok(out)
     }

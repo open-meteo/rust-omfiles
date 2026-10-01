@@ -7,7 +7,7 @@ use crate::traits::{
     OmArrayVariableImpl, OmFileReaderBackendAsync, OmFileVariable, OmFileVariableImpl,
 };
 use crate::traits::{OmFileArrayDataType, OmFileAsyncReadableImpl};
-use crate::utils::reader_utils::process_trailer;
+use crate::utils::reader_utils::{process_trailer, read_counts};
 use crate::variable::OmVariablePtr;
 use async_executor::{Executor, Task};
 use async_lock::Semaphore;
@@ -237,12 +237,12 @@ impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncA
         &self,
         dim_read: &[Range<u64>],
     ) -> Result<ArrayD<T>, OmFilesError> {
-        let out_dims: Vec<u64> = dim_read.iter().map(|r| r.end - r.start).collect();
+        let out_dims = read_counts(dim_read)?;
         let out_dims_usize = out_dims.iter().map(|&x| x as usize).collect::<Vec<_>>();
 
         let mut out = ArrayD::<T>::zeros(out_dims_usize);
 
-        self.read_into::<T>(&mut out, dim_read, &vec![0; dim_read.len()], &out_dims)
+        self.read_into::<T>(&mut out, dim_read, &vec![0; dim_read.len()])
             .await?;
 
         Ok(out)
@@ -257,12 +257,12 @@ impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncA
     /// - `T`: The data type to read (must match the array's data type)
     ///
     /// # Parameters
-    /// - `into`: Target array to read the data into
+    /// - `into`: Standard-layout target array; its shape determines destination dimensions
     /// - `dim_read`: Regions to read from the file as [start..end] ranges
     /// - `into_cube_offset`: Start position in the target array for each dimension
-    /// - `into_cube_dimension`: Size of the region to fill in the target array
-    /// - `io_size_max`: Optional maximum size of I/O operations (default: 65536)
-    /// - `io_size_merge`: Optional threshold for merging small I/O operations (default: 512)
+    ///
+    /// The source ranges, destination array, and destination offset must have the
+    /// same rank, and the read must fit within the destination array.
     ///
     /// # Performance Notes
     /// - Data is fetched concurrently but decoded sequentially
@@ -273,10 +273,8 @@ impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncA
         into: &mut ArrayD<T>,
         dim_read: &[Range<u64>],
         into_cube_offset: &[u64],
-        into_cube_dimension: &[u64],
     ) -> Result<(), OmFilesError> {
-        let decoder =
-            self.prepare_read_parameters::<T>(dim_read, into_cube_offset, into_cube_dimension)?;
+        let mut decoder = self.prepare_read_parameters::<T>(into, dim_read, into_cube_offset)?;
 
         // Process all index blocks
         let mut index_read = decoder.new_index_read();
@@ -342,27 +340,10 @@ impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncA
                 })
                 .await?;
 
-            // Decode all chunks sequentially.
-            // This could also potentially be parallelized using a thread pool.
-            let mut chunk_buffer = vec![0u8; decoder.buffer_size()];
-            // Get access to the output array
-            // SAFETY: The decoder is supposed to write into disjoint slices
-            // of the output array, so this is not racy!
-            let output_bytes = unsafe {
-                let output_slice = into
-                    .as_slice_mut()
-                    .ok_or(OmFilesError::ArrayNotContiguous)?;
-
-                std::slice::from_raw_parts_mut(
-                    output_slice.as_mut_ptr() as *mut u8,
-                    std::mem::size_of_val(output_slice),
-                )
-            };
+            // Decode all chunks sequentially into the retained destination.
             let results: Vec<Result<(), OmFilesError>> = chunk_data
                 .into_iter()
-                .map(|(data_bytes, chunk_index)| {
-                    decoder.decode_chunk(chunk_index, &data_bytes, output_bytes, &mut chunk_buffer)
-                })
+                .map(|(data_bytes, chunk_index)| decoder.decode_chunk(chunk_index, &data_bytes))
                 .collect();
 
             // Check for errors

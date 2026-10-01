@@ -21,7 +21,8 @@ RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --all-features
 Assuming the file `data.om` directly contains a floating point array with 3 dimensions
 
 ```rust
-use omfiles::reader::OmFileReader;
+use ndarray::ArrayD;
+use omfiles::{reader::OmFileReader, traits::{OmArrayVariable, OmFileVariable}};
 
 let file = "data.om";
 let reader = OmFileReader::from_file(file).expect(&format!("Failed to open file: {}", file));
@@ -45,6 +46,14 @@ let data = array_reader
     .read::<f32>(&[50u64..51, 20..21, 10..100])
     .expect("Failed to read data");
 println!("Data: {:?}", data);
+
+// Fill a region of an existing array at an offset; other elements remain zero.
+// Destination dimensions come from its shape, which must use row-major layout.
+// The requested region must fit within the destination.
+let mut destination = ArrayD::<f32>::zeros(vec![2, 2, 100]);
+array_reader
+    .read_into(&mut destination, &[50..51, 20..21, 10..100], &[1, 1, 5])
+    .expect("Failed to read into destination");
 ```
 
 ## Features

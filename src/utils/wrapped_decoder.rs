@@ -1,48 +1,82 @@
 use crate::core::c_defaults::new_index_read;
 use crate::core::c_defaults::{c_error_string, create_uninit_decoder, new_data_read};
 use crate::traits::{OmFileArrayDataType, OmFileReaderBackend};
+use crate::utils::reader_utils::read_counts;
 use crate::{errors::OmFilesError, variable::OmVariablePtr};
 use ndarray::ArrayD;
 use om_file_format_sys::{
     OmDecoder_indexRead_t, OmDecoder_t, OmError_t, OmRange_t, om_decoder_decode_chunks,
     om_decoder_init, om_decoder_next_data_read, om_decoder_next_index_read,
-    om_decoder_read_buffer_size,
+    om_decoder_read_buffer_size, om_variable_get_dimensions_count, om_variable_get_type,
 };
 use std::ffi::c_void;
+use std::ops::Range;
 
-/// Owns read parameters and borrows every other allocation referenced by C.
+/// Binds validated read parameters to a destination and owns decoder scratch storage.
 /// Moving this wrapper does not move any of the pointed-to allocations.
-pub(crate) struct WrappedDecoder<'a> {
+pub(crate) struct WrappedDecoder<'config, 'output, T: OmFileArrayDataType> {
     decoder: OmDecoder_t,
+    output: &'output mut [T],
+    chunk_buffer: Vec<u8>,
     // These fields anchor C pointers; they are never mutated or reallocated.
-    _variable: &'a OmVariablePtr,
-    _cube_offset: &'a [u64],
-    _cube_dimensions: &'a [u64],
+    _variable: &'config OmVariablePtr,
+    _cube_offset: &'config [u64],
+    _cube_dimensions: Vec<u64>,
     _read_count: Vec<u64>,
     _read_offset: Vec<u64>,
 }
 
 // SAFETY: Owned vectors remain allocated and unchanged when the wrapper moves.
-// The shared references keep metadata and cube parameters alive and immutable
-// for 'a; their referents are Sync. C retains no pointers into the wrapper itself.
-unsafe impl Send for WrappedDecoder<'_> {}
-// SAFETY: C only reads the decoder configuration and its backing allocations
-// after initialization. Mutable iterator state, output, and scratch storage are
-// supplied separately for each operation, not stored in this shared wrapper.
-unsafe impl Sync for WrappedDecoder<'_> {}
+// The shared references keep metadata and cube offsets alive and immutable
+// for 'config; their referents are Sync. The destination is exclusively borrowed
+// and T is Send. C retains no pointers into the wrapper itself, and all writes
+// require &mut self, including writes to the owned scratch buffer.
+unsafe impl<T: OmFileArrayDataType + Send> Send for WrappedDecoder<'_, '_, T> {}
 
-impl<'a> WrappedDecoder<'a> {
-    /// Initialize the decoder with read parameters
+impl<'config, 'output, T: OmFileArrayDataType> WrappedDecoder<'config, 'output, T> {
+    /// Validate the destination and initialize the decoder for this read.
     pub(crate) fn new(
-        variable: &'a OmVariablePtr,
-        read_offset: Vec<u64>,
-        read_count: Vec<u64>,
-        cube_offset: &'a [u64],
-        cube_dim: &'a [u64],
+        variable: &'config OmVariablePtr,
+        into: &'output mut ArrayD<T>,
+        dim_read: &[Range<u64>],
+        cube_offset: &'config [u64],
         io_size_merge: u64,
         io_size_max: u64,
     ) -> Result<Self, OmFilesError> {
+        if unsafe { om_variable_get_type(variable.as_ptr()) } as u8 != T::DATA_TYPE_ARRAY as u8 {
+            return Err(OmFilesError::InvalidDataType);
+        }
+        let rank = dim_read.len();
+        if unsafe { om_variable_get_dimensions_count(variable.as_ptr()) } != rank as u64
+            || cube_offset.len() != rank
+            || into.ndim() != rank
+        {
+            return Err(OmFilesError::MismatchingCubeDimensionLength);
+        }
+        if !into.is_standard_layout() {
+            return Err(OmFilesError::ArrayNotContiguous);
+        }
+
+        // C requires row-major destination dimensions.
+        let cube_dim: Vec<u64> = into.shape().iter().map(|&dim| dim as u64).collect();
+        let read_offset: Vec<u64> = dim_read.iter().map(|r| r.start).collect();
+        let read_count = read_counts(dim_read)?;
+        for ((&offset, &count), &dimension) in cube_offset.iter().zip(&read_count).zip(&cube_dim) {
+            if offset.checked_add(count).is_none_or(|end| end > dimension) {
+                return Err(OmFilesError::OffsetAndCountExceedDimension {
+                    offset,
+                    count,
+                    dimension,
+                });
+            }
+        }
+        let output = into
+            .as_slice_mut()
+            .ok_or(OmFilesError::ArrayNotContiguous)?;
+
         let mut decoder = unsafe { create_uninit_decoder() };
+        // The checked ranks match C's parameter arrays. Their backing allocations
+        // are retained by the wrapper for every later decoder call.
         let error = unsafe {
             om_decoder_init(
                 &mut decoder,
@@ -64,6 +98,8 @@ impl<'a> WrappedDecoder<'a> {
 
         Ok(Self {
             decoder,
+            output,
+            chunk_buffer: Vec::new(),
             _variable: variable,
             _cube_offset: cube_offset,
             _cube_dimensions: cube_dim,
@@ -73,83 +109,56 @@ impl<'a> WrappedDecoder<'a> {
     }
 
     /// Read and decode synchronously through the backend.
-    pub(crate) fn decode<OmType: OmFileArrayDataType, Backend: OmFileReaderBackend>(
-        &self,
+    pub(crate) fn decode<Backend: OmFileReaderBackend>(
+        &mut self,
         backend: &Backend,
-        into: &mut ArrayD<OmType>,
-        chunk_buffer: &mut [u8],
     ) -> Result<(), OmFilesError> {
-        let decoder = &self.decoder;
-        let into_ptr = into
-            .as_slice_mut()
-            .ok_or(OmFilesError::ArrayNotContiguous)?
-            .as_mut_ptr();
-
-        let mut index_read = new_index_read(decoder);
-        unsafe {
-            // Loop over index blocks and read index data
-            while om_decoder_next_index_read(decoder, &mut index_read) {
-                let index_data = backend.get_bytes(index_read.offset, index_read.count)?;
-
-                let mut data_read = new_data_read(&index_read);
-
-                let mut error = OmError_t::ERROR_OK;
-
-                // Loop over data blocks and read compressed data chunks
-                while om_decoder_next_data_read(
-                    decoder,
+        let mut index_read = self.new_index_read();
+        while self.next_index_read(&mut index_read) {
+            let index_data = backend.get_bytes(index_read.offset, index_read.count)?;
+            let mut data_read = new_data_read(&index_read);
+            let mut error = OmError_t::ERROR_OK;
+            while unsafe {
+                om_decoder_next_data_read(
+                    &self.decoder,
                     &mut data_read,
                     index_data.as_ptr() as *const c_void,
                     index_read.count,
                     &mut error,
-                ) {
-                    let data_data = backend.get_bytes(data_read.offset, data_read.count)?;
-
-                    if !om_decoder_decode_chunks(
-                        decoder,
-                        data_read.chunkIndex,
-                        data_data.as_ptr() as *const c_void,
-                        data_read.count,
-                        into_ptr as *mut c_void,
-                        chunk_buffer.as_mut_ptr() as *mut c_void,
-                        &mut error,
-                    ) {
-                        let error_string = c_error_string(error);
-                        return Err(OmFilesError::DecoderError(error_string));
-                    }
-                }
-                if error != OmError_t::ERROR_OK {
-                    let error_string = c_error_string(error);
-                    return Err(OmFilesError::DecoderError(error_string));
-                }
+                )
+            } {
+                let data = backend.get_bytes(data_read.offset, data_read.count)?;
+                self.decode_chunk(data_read.chunkIndex, &data)?;
+            }
+            if error != OmError_t::ERROR_OK {
+                return Err(OmFilesError::DecoderError(c_error_string(error)));
             }
         }
         Ok(())
     }
 
-    /// Get the required buffer size for decoding
-    pub(crate) fn buffer_size(&self) -> usize {
-        unsafe { om_decoder_read_buffer_size(&self.decoder) as usize }
-    }
-
     /// Decode a chunk using this decoder configuration
     pub(crate) fn decode_chunk(
-        &self,
+        &mut self,
         chunk_index: OmRange_t,
         data: &[u8],
-        output: &mut [u8], // Raw bytes of output array
-        chunk_buffer: &mut [u8],
     ) -> Result<(), OmFilesError> {
+        if self.chunk_buffer.is_empty() {
+            let size = unsafe { om_decoder_read_buffer_size(&self.decoder) } as usize;
+            self.chunk_buffer.resize(size, 0);
+        }
         let mut error = OmError_t::ERROR_OK;
 
+        // Construction fixes the destination type and geometry. Both writable
+        // buffers remain alive and exclusively borrowed for this call.
         let success = unsafe {
             om_decoder_decode_chunks(
                 &self.decoder,
                 chunk_index,
                 data.as_ptr() as *const c_void,
                 data.len() as u64,
-                output.as_mut_ptr() as *mut c_void,
-                chunk_buffer.as_mut_ptr() as *mut c_void,
+                self.output.as_mut_ptr() as *mut c_void,
+                self.chunk_buffer.as_mut_ptr() as *mut c_void,
                 &mut error,
             )
         };
@@ -216,10 +225,6 @@ mod tests {
 
     #[test]
     fn moved_decoder_reads_into_offset_destination() -> Result<(), OmFilesError> {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<WrappedDecoder<'_>>();
-        assert_send_sync::<OmVariablePtr>();
-
         let mut backend = InMemoryBackend::new(vec![]);
         let mut writer = OmFileWriter::new(&mut backend, 1024);
         let mut array = writer.prepare_array::<i32>(
@@ -239,24 +244,13 @@ mod tests {
         let reader = OmFileReader::new(Arc::new(backend))?;
         let array = reader.expect_array()?;
         let cube_offset = vec![1, 1];
-        let cube_dimensions = vec![3, 3];
-        let decoder =
-            array.prepare_read_parameters::<i32>(&[0..2, 0..2], &cube_offset, &cube_dimensions)?;
+        let mut output = ArrayD::<i32>::from_elem(vec![3, 3], -1);
+        let mut decoder =
+            array.prepare_read_parameters::<i32>(&mut output, &[0..2, 0..2], &cube_offset)?;
         let backend = reader.backend.as_ref();
 
-        // Move the decoder while its borrowed metadata and cube parameters
-        // remain on this thread. Read parameters are owned by the decoder.
-        let output = std::thread::scope(|scope| {
-            scope
-                .spawn(move || {
-                    let mut output = ArrayD::<i32>::from_elem(vec![3, 3], -1);
-                    let mut scratch = vec![0; decoder.buffer_size()];
-                    decoder.decode(backend, &mut output, &mut scratch)?;
-                    Ok::<_, OmFilesError>(output)
-                })
-                .join()
-                .unwrap()
-        })?;
+        // Borrowed metadata and offsets stay alive while the decoder moves.
+        std::thread::scope(|scope| scope.spawn(move || decoder.decode(backend)).join().unwrap())?;
         assert_eq!(
             output.as_slice().unwrap(),
             &[-1, -1, -1, -1, 1, 2, -1, 3, 4]
