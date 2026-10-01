@@ -10,20 +10,20 @@ use om_file_format_sys::{
 };
 use std::ffi::c_void;
 
-/// Owns read parameters and borrows every other allocation referenced by C.
+/// Owns read parameters and destination dimensions, and borrows the remaining C inputs.
 /// Moving this wrapper does not move any of the pointed-to allocations.
 pub(crate) struct WrappedDecoder<'a> {
     decoder: OmDecoder_t,
     // These fields anchor C pointers; they are never mutated or reallocated.
     _variable: &'a OmVariablePtr,
     _cube_offset: &'a [u64],
-    _cube_dimensions: &'a [u64],
+    _cube_dimensions: Vec<u64>,
     _read_count: Vec<u64>,
     _read_offset: Vec<u64>,
 }
 
 // SAFETY: Owned vectors remain allocated and unchanged when the wrapper moves.
-// The shared references keep metadata and cube parameters alive and immutable
+// The shared references keep metadata and cube offsets alive and immutable
 // for 'a; their referents are Sync. C retains no pointers into the wrapper itself.
 unsafe impl Send for WrappedDecoder<'_> {}
 // SAFETY: C only reads the decoder configuration and its backing allocations
@@ -38,7 +38,7 @@ impl<'a> WrappedDecoder<'a> {
         read_offset: Vec<u64>,
         read_count: Vec<u64>,
         cube_offset: &'a [u64],
-        cube_dim: &'a [u64],
+        cube_dim: Vec<u64>,
         io_size_merge: u64,
         io_size_max: u64,
     ) -> Result<Self, OmFilesError> {
@@ -239,17 +239,14 @@ mod tests {
         let reader = OmFileReader::new(Arc::new(backend))?;
         let array = reader.expect_array()?;
         let cube_offset = vec![1, 1];
-        let cube_dimensions = vec![3, 3];
-        let decoder =
-            array.prepare_read_parameters::<i32>(&[0..2, 0..2], &cube_offset, &cube_dimensions)?;
+        let mut output = ArrayD::<i32>::from_elem(vec![3, 3], -1);
+        let decoder = array.prepare_read_parameters::<i32>(&output, &[0..2, 0..2], &cube_offset)?;
         let backend = reader.backend.as_ref();
 
-        // Move the decoder while its borrowed metadata and cube parameters
-        // remain on this thread. Read parameters are owned by the decoder.
+        // Borrowed metadata and offsets stay alive while the decoder moves.
         let output = std::thread::scope(|scope| {
             scope
                 .spawn(move || {
-                    let mut output = ArrayD::<i32>::from_elem(vec![3, 3], -1);
                     let mut scratch = vec![0; decoder.buffer_size()];
                     decoder.decode(backend, &mut output, &mut scratch)?;
                     Ok::<_, OmFilesError>(output)

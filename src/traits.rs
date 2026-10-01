@@ -4,6 +4,7 @@ use crate::errors::OmFilesError;
 use crate::reader::OmFileReader;
 use crate::reader_async::OmFileReaderAsync;
 use crate::variable::{OmOffsetSize, OmVariablePtr};
+use ndarray::ArrayD;
 use om_file_format_sys::om_variable_get_children;
 #[cfg(feature = "metadata-tree")]
 use std::collections::HashMap;
@@ -204,9 +205,9 @@ pub(crate) trait OmArrayVariableImpl: OmFileVariableImpl {
     /// Prepare common parameters for reading data
     fn prepare_read_parameters<'a, U: OmFileArrayDataType>(
         &'a self,
+        into: &ArrayD<U>,
         dim_read: &[Range<u64>],
         into_cube_offset: &'a [u64],
-        into_cube_dimension: &'a [u64],
     ) -> Result<crate::utils::wrapped_decoder::WrappedDecoder<'a>, OmFilesError>
     where
         Self: Sized,
@@ -220,14 +221,35 @@ pub(crate) trait OmArrayVariableImpl: OmFileVariableImpl {
         // Validate dimension counts
         if n_dims != n_dimensions_read
             || n_dimensions_read != into_cube_offset.len()
-            || n_dimensions_read != into_cube_dimension.len()
+            || n_dimensions_read != into.ndim()
         {
             return Err(OmFilesError::MismatchingCubeDimensionLength);
         }
 
+        if !into.is_standard_layout() {
+            return Err(OmFilesError::ArrayNotContiguous);
+        }
+
+        // C requires row-major destination dimensions.
+        let into_cube_dimension: Vec<u64> = into.shape().iter().map(|&dim| dim as u64).collect();
+
         // Prepare read parameters
         let read_offset: Vec<u64> = dim_read.iter().map(|r| r.start).collect();
         let read_count: Vec<u64> = dim_read.iter().map(|r| r.end - r.start).collect();
+
+        for ((&offset, &count), &dimension) in into_cube_offset
+            .iter()
+            .zip(&read_count)
+            .zip(&into_cube_dimension)
+        {
+            if offset.checked_add(count).is_none_or(|end| end > dimension) {
+                return Err(OmFilesError::OffsetAndCountExceedDimension {
+                    offset,
+                    count,
+                    dimension,
+                });
+            }
+        }
 
         // Initialize decoder
         let decoder = crate::utils::wrapped_decoder::WrappedDecoder::new(

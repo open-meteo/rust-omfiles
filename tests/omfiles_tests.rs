@@ -20,7 +20,7 @@ use std::{
 };
 
 mod test_utils;
-use test_utils::remove_file_if_exists;
+use test_utils::{AsyncMemory, remove_file_if_exists};
 
 #[test]
 fn turbo_pfor_roundtrip() {
@@ -732,7 +732,7 @@ fn test_write_v3() -> Result<(), Box<dyn std::error::Error>> {
         for x in 0..5 {
             for y in 0..5 {
                 let mut r = ArrayD::from_elem(vec![3, 3], f32::NAN);
-                read.read_into(&mut r, &[x..x + 1, y..y + 1], &[1, 1], &[3, 3])?;
+                read.read_into(&mut r, &[x..x + 1, y..y + 1], &[1, 1])?;
                 let expected = ArrayD::from_shape_vec(
                     vec![3, 3],
                     vec![
@@ -1324,22 +1324,6 @@ where
 
 #[apply(test!)]
 async fn test_supported_numeric_types_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
-    use omfiles::traits::OmFileReaderBackendAsync;
-
-    // Reuse the checked memory backend for async reads without filesystem I/O.
-    struct AsyncMemory(Arc<InMemoryBackend>);
-    impl OmFileReaderBackendAsync for AsyncMemory {
-        type Bytes = Vec<u8>;
-
-        fn count_async(&self) -> usize {
-            self.0.count()
-        }
-
-        async fn get_bytes_async(&self, offset: u64, count: u64) -> Result<Vec<u8>, OmFilesError> {
-            Ok(self.0.get_bytes(offset, count)?.to_vec())
-        }
-    }
-
     macro_rules! roundtrip {
         ($ty:ty, $compression:ident, $scalar_values:expr, $array_values:expr) => {{
             let scalar_values: &[$ty] = &$scalar_values;
@@ -1429,5 +1413,43 @@ async fn test_supported_numeric_types_roundtrip() -> Result<(), Box<dyn std::err
         ],
         [0.0f64, -0.0, 1.5, -2.5]
     );
+    Ok(())
+}
+
+#[apply(test!)]
+async fn test_read_into_derives_destination_dimensions() -> Result<(), Box<dyn std::error::Error>> {
+    let mut backend = InMemoryBackend::new(vec![]);
+    let mut writer = OmFileWriter::new(&mut backend, 1024);
+    let values = ArrayD::from_shape_vec(vec![2, 2], vec![1i32, 2, 3, 4])?;
+    let mut array = writer.prepare_array::<i32>(
+        vec![2, 2],
+        vec![1, 2],
+        OmCompressionType::PforDelta2d,
+        1.0,
+        0.0,
+    )?;
+    array.write_data(values.view(), None, None)?;
+    let array = array.finalize();
+    let root = writer.write_array(array, "data", &[])?;
+    writer.write_trailer(root)?;
+    drop(writer);
+
+    let backend = Arc::new(backend);
+    let reader = OmFileReader::new(backend.clone())?;
+    let async_reader = OmFileReaderAsync::new(Arc::new(AsyncMemory(backend))).await?;
+    // A rectangular destination exercises strides derived from the ndarray.
+    let mut output = ArrayD::from_elem(vec![3, 4], -1i32);
+    reader
+        .expect_array()?
+        .read_into(&mut output, &[0..2, 0..2], &[1, 2])?;
+    let expected =
+        ArrayD::from_shape_vec(vec![3, 4], vec![-1, -1, -1, -1, -1, -1, 1, 2, -1, -1, 3, 4])?;
+    assert_eq!(output, expected);
+    output.fill(-1);
+    async_reader
+        .expect_array()?
+        .read_into(&mut output, &[0..2, 0..2], &[1, 2])
+        .await?;
+    assert_eq!(output, expected);
     Ok(())
 }

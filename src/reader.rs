@@ -228,16 +228,18 @@ impl<'a, Backend> OmArrayVariableImpl for OmFileArray<'a, Backend> {
 }
 
 impl<'a, Backend: OmFileReaderBackend> OmFileArray<'a, Backend> {
-    /// Read a variable as an array of a dynamic data type.
+    /// Read source ranges into a standard-layout array at the destination offset.
+    ///
+    /// Destination dimensions are derived from `into.shape()`. The source ranges,
+    /// destination array, and destination offset must have the same rank, and the
+    /// read must fit within the destination array.
     pub fn read_into<T: OmFileArrayDataType>(
         &self,
         into: &mut ArrayD<T>,
         dim_read: &[Range<u64>],
         into_cube_offset: &[u64],
-        into_cube_dimension: &[u64],
     ) -> Result<(), OmFilesError> {
-        let decoder =
-            self.prepare_read_parameters::<T>(dim_read, into_cube_offset, into_cube_dimension)?;
+        let decoder = self.prepare_read_parameters::<T>(into, dim_read, into_cube_offset)?;
 
         let mut chunk_buffer = vec![0u8; decoder.buffer_size()];
         decoder.decode(self.backend.as_ref(), into, chunk_buffer.as_mut_slice())?;
@@ -254,7 +256,7 @@ impl<'a, Backend: OmFileReaderBackend> OmFileArray<'a, Backend> {
 
         let mut out = ArrayD::<T>::zeros(out_dims_usize);
 
-        self.read_into::<T>(&mut out, dim_read, &vec![0; dim_read.len()], &out_dims)?;
+        self.read_into::<T>(&mut out, dim_read, &vec![0; dim_read.len()])?;
 
         Ok(out)
     }
