@@ -274,7 +274,7 @@ impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncA
         dim_read: &[Range<u64>],
         into_cube_offset: &[u64],
     ) -> Result<(), OmFilesError> {
-        let decoder = self.prepare_read_parameters::<T>(into, dim_read, into_cube_offset)?;
+        let mut decoder = self.prepare_read_parameters::<T>(into, dim_read, into_cube_offset)?;
 
         // Process all index blocks
         let mut index_read = decoder.new_index_read();
@@ -340,27 +340,10 @@ impl<'a, Backend: OmFileReaderBackendAsync + Send + Sync + 'static> OmFileAsyncA
                 })
                 .await?;
 
-            // Decode all chunks sequentially.
-            // This could also potentially be parallelized using a thread pool.
-            let mut chunk_buffer = vec![0u8; decoder.buffer_size()];
-            // Get access to the output array
-            // SAFETY: The decoder is supposed to write into disjoint slices
-            // of the output array, so this is not racy!
-            let output_bytes = unsafe {
-                let output_slice = into
-                    .as_slice_mut()
-                    .ok_or(OmFilesError::ArrayNotContiguous)?;
-
-                std::slice::from_raw_parts_mut(
-                    output_slice.as_mut_ptr() as *mut u8,
-                    std::mem::size_of_val(output_slice),
-                )
-            };
+            // Decode all chunks sequentially into the retained destination.
             let results: Vec<Result<(), OmFilesError>> = chunk_data
                 .into_iter()
-                .map(|(data_bytes, chunk_index)| {
-                    decoder.decode_chunk(chunk_index, &data_bytes, output_bytes, &mut chunk_buffer)
-                })
+                .map(|(data_bytes, chunk_index)| decoder.decode_chunk(chunk_index, &data_bytes))
                 .collect();
 
             // Check for errors

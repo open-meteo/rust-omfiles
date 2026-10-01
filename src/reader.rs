@@ -239,12 +239,8 @@ impl<'a, Backend: OmFileReaderBackend> OmFileArray<'a, Backend> {
         dim_read: &[Range<u64>],
         into_cube_offset: &[u64],
     ) -> Result<(), OmFilesError> {
-        let decoder = self.prepare_read_parameters::<T>(into, dim_read, into_cube_offset)?;
-
-        let mut chunk_buffer = vec![0u8; decoder.buffer_size()];
-        decoder.decode(self.backend.as_ref(), into, chunk_buffer.as_mut_slice())?;
-
-        Ok(())
+        let mut decoder = self.prepare_read_parameters::<T>(into, dim_read, into_cube_offset)?;
+        decoder.decode(self.backend.as_ref())
     }
 
     pub fn read<T: OmFileArrayDataType + Clone + Zero>(
