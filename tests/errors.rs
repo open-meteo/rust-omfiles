@@ -12,6 +12,44 @@ mod test_utils;
 use test_utils::{AsyncMemory, remove_file_if_exists};
 
 #[macro_rules_attribute::apply(smol_macros::test!)]
+async fn test_reversed_source_ranges_return_errors() -> Result<(), OmFilesError> {
+    let mut backend = InMemoryBackend::new(vec![]);
+    write_i32_om_file(&mut backend)?;
+    let backend = Arc::new(backend);
+    let reader = OmFileReader::new(backend.clone())?;
+    let async_reader = OmFileReaderAsync::new(Arc::new(AsyncMemory(backend))).await?;
+    let array = reader.expect_array()?;
+    let async_array = async_reader.expect_array()?;
+    let reversed = std::ops::Range { start: 2, end: 1 };
+    let expected = OmFilesError::InvalidReadRange {
+        range: reversed.clone(),
+    };
+
+    for ranges in [[reversed.clone(), 0..1], [0..1, reversed]] {
+        assert_eq!(array.read::<i32>(&ranges).unwrap_err(), expected);
+        assert_eq!(
+            async_array.read::<i32>(&ranges).await.unwrap_err(),
+            expected
+        );
+
+        let mut output = ArrayD::from_elem(vec![10, 10], -1i32);
+        assert_eq!(
+            array.read_into(&mut output, &ranges, &[0, 0]).unwrap_err(),
+            expected
+        );
+        assert_eq!(
+            async_array
+                .read_into(&mut output, &ranges, &[0, 0])
+                .await
+                .unwrap_err(),
+            expected
+        );
+        assert!(output.iter().all(|&value| value == -1));
+    }
+    Ok(())
+}
+
+#[macro_rules_attribute::apply(smol_macros::test!)]
 async fn test_read_into_rejects_invalid_destinations() -> Result<(), OmFilesError> {
     let mut backend = InMemoryBackend::new(vec![]);
     write_i32_om_file(&mut backend)?;

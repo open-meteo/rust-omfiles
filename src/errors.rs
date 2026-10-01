@@ -26,6 +26,8 @@ pub enum OmFilesError {
         range: std::ops::Range<usize>,
         allowed: usize,
     },
+    #[error("Read range end precedes start: {range:?}")]
+    InvalidReadRange { range: std::ops::Range<u64> },
     #[error("Invalid backend read: offset {offset}, count {count}, size {size}")]
     InvalidBackendRead {
         offset: u64,

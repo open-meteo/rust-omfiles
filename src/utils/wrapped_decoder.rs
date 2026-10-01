@@ -1,6 +1,7 @@
 use crate::core::c_defaults::new_index_read;
 use crate::core::c_defaults::{c_error_string, create_uninit_decoder, new_data_read};
 use crate::traits::{OmFileArrayDataType, OmFileReaderBackend};
+use crate::utils::reader_utils::read_counts;
 use crate::{errors::OmFilesError, variable::OmVariablePtr};
 use ndarray::ArrayD;
 use om_file_format_sys::{
@@ -59,7 +60,7 @@ impl<'config, 'output, T: OmFileArrayDataType> WrappedDecoder<'config, 'output, 
         // C requires row-major destination dimensions.
         let cube_dim: Vec<u64> = into.shape().iter().map(|&dim| dim as u64).collect();
         let read_offset: Vec<u64> = dim_read.iter().map(|r| r.start).collect();
-        let read_count: Vec<u64> = dim_read.iter().map(|r| r.end - r.start).collect();
+        let read_count = read_counts(dim_read)?;
         for ((&offset, &count), &dimension) in cube_offset.iter().zip(&read_count).zip(&cube_dim) {
             if offset.checked_add(count).is_none_or(|end| end > dimension) {
                 return Err(OmFilesError::OffsetAndCountExceedDimension {

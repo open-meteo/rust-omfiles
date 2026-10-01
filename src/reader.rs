@@ -8,7 +8,7 @@ use crate::traits::{
     OmArrayVariableImpl, OmFileReadableImpl, OmFileReaderBackend, OmFileVariable,
     OmFileVariableImpl, OmScalarVariableImpl,
 };
-use crate::utils::reader_utils::process_trailer;
+use crate::utils::reader_utils::{process_trailer, read_counts};
 use crate::variable::OmVariablePtr;
 use ndarray::ArrayD;
 use num_traits::Zero;
@@ -247,7 +247,7 @@ impl<'a, Backend: OmFileReaderBackend> OmFileArray<'a, Backend> {
         &self,
         dim_read: &[Range<u64>],
     ) -> Result<ArrayD<T>, OmFilesError> {
-        let out_dims: Vec<u64> = dim_read.iter().map(|r| r.end - r.start).collect();
+        let out_dims = read_counts(dim_read)?;
         let out_dims_usize = out_dims.iter().map(|&x| x as usize).collect::<Vec<_>>();
 
         let mut out = ArrayD::<T>::zeros(out_dims_usize);
